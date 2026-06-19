@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Retrowave Minimal Browser App Icon</title>
+  <desc id="desc">A circular retrowave-inspired icon with a neon sunset, dark horizon, and perspective grid.</desc>
+  <defs>
+    <clipPath id="iconClip">
+      <circle cx="256" cy="256" r="238"/>
+    </clipPath>
+
+    <linearGradient id="outerRing" x1="80" y1="80" x2="432" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#21F6FF"/>
+      <stop offset="0.48" stop-color="#8F4DFF"/>
+      <stop offset="1" stop-color="#FF3EC8"/>
+    </linearGradient>
+
+    <radialGradient id="sky" cx="50%" cy="36%" r="70%">
+      <stop offset="0" stop-color="#281052"/>
+      <stop offset="0.44" stop-color="#12082E"/>
+      <stop offset="1" stop-color="#05040F"/>
+    </radialGradient>
+
+    <linearGradient id="sun" x1="256" y1="102" x2="256" y2="284" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE66D"/>
+      <stop offset="0.45" stop-color="#FF7A3D"/>
+      <stop offset="1" stop-color="#FF2BD6"/>
+    </linearGradient>
+
+    <clipPath id="sunClip">
+      <circle cx="256" cy="196" r="92"/>
+    </clipPath>
+
+    <linearGradient id="gridFade" x1="256" y1="292" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#21F6FF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#21F6FF" stop-opacity="0.25"/>
+    </linearGradient>
+
+    <linearGradient id="floor" x1="256" y1="286" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#160A32"/>
+      <stop offset="1" stop-color="#070613"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Transparent outside the circle for browser/app use -->
+  <g clip-path="url(#iconClip)">
+    <circle cx="256" cy="256" r="238" fill="url(#sky)"/>
+
+    <!-- Minimal retrowave sun -->
+    <circle cx="256" cy="196" r="92" fill="url(#sun)"/>
+    <g clip-path="url(#sunClip)" fill="#12082E" opacity="0.82">
+      <rect x="152" y="154" width="208" height="8" rx="4"/>
+      <rect x="146" y="177" width="220" height="10" rx="5"/>
+      <rect x="142" y="204" width="228" height="12" rx="6"/>
+      <rect x="136" y="236" width="240" height="14" rx="7"/>
+      <rect x="132" y="272" width="248" height="18" rx="9"/>
+    </g>
+
+    <!-- Horizon silhouette -->
+    <path d="M28 292 L92 292 L135 244 L179 292 L222 262 L256 292 L301 246 L360 292 L424 262 L484 292 L484 512 L28 512 Z" fill="#090514"/>
+    <path d="M28 292 H484" stroke="#FF3EC8" stroke-width="5" stroke-linecap="round" opacity="0.75"/>
+
+    <!-- Floor -->
+    <path d="M28 292 H484 L512 512 H0 Z" fill="url(#floor)"/>
+
+    <!-- Perspective grid -->
+    <g stroke="url(#gridFade)" stroke-width="3" stroke-linecap="round" opacity="0.72">
+      <path d="M256 292 L-42 512"/>
+      <path d="M256 292 L34 512"/>
+      <path d="M256 292 L101 512"/>
+      <path d="M256 292 L163 512"/>
+      <path d="M256 292 L218 512"/>
+      <path d="M256 292 L256 512"/>
+      <path d="M256 292 L294 512"/>
+      <path d="M256 292 L349 512"/>
+      <path d="M256 292 L411 512"/>
+      <path d="M256 292 L478 512"/>
+      <path d="M256 292 L554 512"/>
+    </g>
+
+    <g stroke="#21F6FF" stroke-width="3" stroke-linecap="round" opacity="0.56">
+      <path d="M29 315 H483"/>
+      <path d="M17 341 H495"/>
+      <path d="M0 376 H512"/>
+      <path d="M0 424 H512"/>
+      <path d="M0 492 H512"/>
+    </g>
+
+    <!-- Subtle center glow -->
+    <circle cx="256" cy="306" r="168" fill="#FF3EC8" opacity="0.08"/>
+  </g>
+
+  <!-- Crisp circular app boundary -->
+  <circle cx="256" cy="256" r="238" fill="none" stroke="#05040F" stroke-width="20"/>
+  <circle cx="256" cy="256" r="229" fill="none" stroke="url(#outerRing)" stroke-width="10"/>
+</svg>

@@ -18,6 +18,7 @@ C:\mozilla-source\astrid-firefox
 - Allows uBlock filter lists to update automatically, while keeping extension package updates manual through `scripts/update-blocker.ps1`.
 - Builds a per-user Windows installer and updater package for v1 releases.
 - Installs a manual updater that checks GitHub Releases only when launched.
+- Uses tracked iconography from `assets/` for the installer, uninstall entry, and Windows shortcuts.
 - Uses a small patch-stack workflow so Astrid can rebase onto ESR updates.
 
 ## Quick Start
@@ -73,6 +74,8 @@ This writes:
 - `AstridSetup-1.0.0-win64.exe`: per-user installer for `%LOCALAPPDATA%\Programs\Astrid`.
 - `Astrid-1.0.0-win64.zip`: updater payload.
 - `Astrid-1.0.0-release.json`: release manifest with SHA-256 hashes.
+
+The package step copies the tracked iconography from `assets/` and generates `assets\astrid.ico` inside the staged app for Inno Setup and Windows shortcuts.
 
 Publish those assets to GitHub Releases:
 

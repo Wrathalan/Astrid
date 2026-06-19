@@ -1045,6 +1045,76 @@ function Reset-AstridDirectory {
     return $fullPath
 }
 
+function Save-AstridInstallerIcon {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RepoRoot,
+        [Parameter(Mandatory)]
+        [string] $OutputPath
+    )
+
+    $repoFullPath = [System.IO.Path]::GetFullPath($RepoRoot)
+    $iconEntries = @(
+        [pscustomobject]@{
+            Path = Join-Path $repoFullPath 'assets\favicon_64.png'
+            Size = 64
+        },
+        [pscustomobject]@{
+            Path = Join-Path $repoFullPath 'assets\retrowave_browser_icon_256.png'
+            Size = 256
+        }
+    )
+
+    $payloads = [System.Collections.Generic.List[object]]::new()
+    foreach ($entry in $iconEntries) {
+        if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) {
+            throw "Missing Astrid icon source asset '$($entry.Path)'."
+        }
+
+        $payloads.Add([pscustomobject]@{
+            Size = [int] $entry.Size
+            Bytes = [System.IO.File]::ReadAllBytes($entry.Path)
+        })
+    }
+
+    $parent = Split-Path -Parent $OutputPath
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    $stream = [System.IO.File]::Open($OutputPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+    $writer = [System.IO.BinaryWriter]::new($stream)
+    try {
+        $writer.Write([UInt16] 0)
+        $writer.Write([UInt16] 1)
+        $writer.Write([UInt16] $payloads.Count)
+
+        $offset = 6 + (16 * $payloads.Count)
+        foreach ($payload in $payloads) {
+            $sizeByte = if ($payload.Size -eq 256) { [byte] 0 } else { [byte] $payload.Size }
+            $writer.Write($sizeByte)
+            $writer.Write($sizeByte)
+            $writer.Write([byte] 0)
+            $writer.Write([byte] 0)
+            $writer.Write([UInt16] 1)
+            $writer.Write([UInt16] 32)
+            $writer.Write([UInt32] $payload.Bytes.Length)
+            $writer.Write([UInt32] $offset)
+            $offset += $payload.Bytes.Length
+        }
+
+        foreach ($payload in $payloads) {
+            $writer.Write([byte[]] $payload.Bytes)
+        }
+    } finally {
+        $writer.Dispose()
+        $stream.Dispose()
+    }
+
+    return $OutputPath
+}
+
 function New-AstridPackageStaging {
     [CmdletBinding()]
     param(
@@ -1073,6 +1143,19 @@ function New-AstridPackageStaging {
 
     foreach ($item in Get-ChildItem -LiteralPath $browserFullPath -Force) {
         Copy-Item -LiteralPath $item.FullName -Destination $appDir -Recurse -Force
+    }
+
+    $assetsSourceDir = Join-Path $repoFullPath 'assets'
+    $installerIconPath = ''
+    if (Test-Path -LiteralPath $assetsSourceDir -PathType Container) {
+        $assetsDestDir = Join-Path $appDir 'assets'
+        New-Item -ItemType Directory -Path $assetsDestDir -Force | Out-Null
+        foreach ($asset in Get-ChildItem -LiteralPath $assetsSourceDir -Force) {
+            Copy-Item -LiteralPath $asset.FullName -Destination $assetsDestDir -Recurse -Force
+        }
+
+        $installerIconPath = Join-Path $assetsDestDir 'astrid.ico'
+        [void] (Save-AstridInstallerIcon -RepoRoot $repoFullPath -OutputPath $installerIconPath)
     }
 
     $installScriptsDir = Join-Path $repoFullPath 'scripts\install'
@@ -1104,6 +1187,7 @@ function New-AstridPackageStaging {
         VersionPath = Join-Path $appDir 'astrid-version.json'
         UpdaterPath = Join-Path $appDir 'AstridUpdater.ps1'
         UpdaterLauncherPath = Join-Path $appDir 'AstridUpdateCheck.cmd'
+        InstallerIconPath = $installerIconPath
     }
 }
 
@@ -1137,6 +1221,8 @@ function Save-AstridInnoSetupScript {
     New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
     $sourceGlob = Join-Path $stagingFullPath '*'
     $outputBaseName = [System.IO.Path]::GetFileNameWithoutExtension((Get-AstridInstallerAssetName -Version $Version))
+    $iconPath = Join-Path $stagingFullPath 'assets\astrid.ico'
+    $hasIcon = Test-Path -LiteralPath $iconPath -PathType Leaf
     $outputDirLine = [string]::Concat('OutputDir=', $OutputDir)
     $outputBaseNameLine = [string]::Concat('OutputBaseFilename=', $outputBaseName)
     $sourceLine = [string]::Concat(
@@ -1144,6 +1230,20 @@ function Save-AstridInnoSetupScript {
         (ConvertTo-AstridInnoQuotedString -Value $sourceGlob),
         '; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs'
     )
+    $setupIconLines = @()
+    $shortcutIconSuffix = ''
+    if ($hasIcon) {
+        $setupIconLines = @(
+            [string]::Concat('SetupIconFile=', $iconPath),
+            'UninstallDisplayIcon={app}\assets\astrid.ico'
+        )
+        $shortcutIconSuffix = '; IconFilename: "{app}\assets\astrid.ico"'
+    }
+
+    $astridShortcutLine = [string]::Concat('Name: "{group}\Astrid"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"', $shortcutIconSuffix)
+    $updaterShortcutLine = [string]::Concat('Name: "{group}\Check for Astrid Updates"; Filename: "{app}\AstridUpdateCheck.cmd"; WorkingDir: "{app}"', $shortcutIconSuffix)
+    $desktopShortcutLine = [string]::Concat('Name: "{autodesktop}\Astrid"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon', $shortcutIconSuffix)
+
     $lines = @(
         '#define MyAppName "Astrid"',
         "#define MyAppVersion $(ConvertTo-AstridInnoQuotedString -Value $Version)",
@@ -1165,7 +1265,8 @@ function Save-AstridInnoSetupScript {
         'SolidCompression=yes',
         'WizardStyle=modern',
         'ArchitecturesAllowed=x64',
-        'UninstallDisplayName=Astrid',
+        'UninstallDisplayName=Astrid'
+    ) + $setupIconLines + @(
         '',
         '[Tasks]',
         'Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked',
@@ -1174,9 +1275,9 @@ function Save-AstridInnoSetupScript {
         $sourceLine,
         '',
         '[Icons]',
-        'Name: "{group}\Astrid"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"',
-        'Name: "{group}\Check for Astrid Updates"; Filename: "{app}\AstridUpdateCheck.cmd"; WorkingDir: "{app}"',
-        'Name: "{autodesktop}\Astrid"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon',
+        $astridShortcutLine,
+        $updaterShortcutLine,
+        $desktopShortcutLine,
         '',
         '[Run]',
         'Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, ''&'', ''&&'')}}"; Flags: nowait postinstall skipifsilent'
@@ -1225,6 +1326,7 @@ Export-ModuleMember -Function @(
     'New-AstridAutoConfigPreferences',
     'New-AstridPolicies',
     'New-AstridReleaseMetadata',
+    'Save-AstridInstallerIcon',
     'Save-AstridPolicies',
     'Save-AstridInnoSetupScript',
     'Save-AstridReleaseManifest',

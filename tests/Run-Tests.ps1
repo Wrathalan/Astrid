@@ -343,10 +343,31 @@ Invoke-Test 'package staging writes updater and installed version metadata' {
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'astrid-version.json') -PathType Leaf) 'Staging must write installed version metadata.'
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'AstridUpdater.ps1') -PathType Leaf) 'Staging must include the updater script.'
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'AstridUpdateCheck.cmd') -PathType Leaf) 'Staging must include the updater launcher.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'assets\retrowave_browser_icon_512.png') -PathType Leaf) 'Staging must include Astrid icon assets.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'assets\astrid.ico') -PathType Leaf) 'Staging must create the Windows installer icon.'
 
         $versionInfo = Get-Content -LiteralPath (Join-Path $staged.AppDir 'astrid-version.json') -Raw | ConvertFrom-Json
         Assert-Equal $versionInfo.version '1.0.0' 'Installed version metadata must record the installed version.'
         Assert-Equal $versionInfo.repository 'Wrathalan/Astrid' 'Installed version metadata must record the update repository.'
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-Test 'installer icon generator writes a Windows ICO from Astrid PNG assets' {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-icon-" + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempRoot | Out-Null
+    try {
+        $iconPath = Join-Path $tempRoot 'astrid.ico'
+        [void] (Save-AstridInstallerIcon -RepoRoot $RepoRoot -OutputPath $iconPath)
+
+        $bytes = [System.IO.File]::ReadAllBytes($iconPath)
+        Assert-Equal $bytes[0] 0 'ICO reserved byte 0 must be zero.'
+        Assert-Equal $bytes[2] 1 'ICO type must be icon.'
+        Assert-Equal $bytes[4] 2 'ICO must contain 64px and 256px PNG entries.'
+        Assert-Equal $bytes[6] 64 'First ICO image entry must be 64px.'
+        Assert-Equal $bytes[22] 0 'Second ICO image entry width byte must be zero for 256px.'
+        Assert-True ($bytes.Length -gt 1000) 'Generated ICO must include image payloads.'
     } finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -361,6 +382,9 @@ Invoke-Test 'installer script uses per-user install directory and updater shortc
     try {
         Set-Content -LiteralPath (Join-Path $stagingAppDir 'astrid.exe') -Value 'fake browser' -Encoding Ascii
         Set-Content -LiteralPath (Join-Path $stagingAppDir 'AstridUpdateCheck.cmd') -Value '@echo off' -Encoding Ascii
+        $iconDir = Join-Path $stagingAppDir 'assets'
+        New-Item -ItemType Directory -Path $iconDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $iconDir 'astrid.ico') -Value 'fake icon' -Encoding Ascii
 
         [void] (Save-AstridInnoSetupScript -Version '1.0.0' -StagingAppDir $stagingAppDir -OutputDir $outputDir -ScriptPath $scriptPath)
         $scriptText = Get-Content -LiteralPath $scriptPath -Raw
@@ -368,6 +392,8 @@ Invoke-Test 'installer script uses per-user install directory and updater shortc
         Assert-True ($scriptText.Contains('DefaultDirName={localappdata}\Programs\Astrid')) 'Installer must default to a per-user writable install directory.'
         Assert-True ($scriptText.Contains('AstridUpdateCheck.cmd')) 'Installer must create an updater shortcut.'
         Assert-True ($scriptText.Contains('AstridSetup-1.0.0-win64')) 'Installer output name must include the release version.'
+        Assert-True ($scriptText.Contains("SetupIconFile=$(Join-Path $iconDir 'astrid.ico')")) 'Installer must use the packaged Astrid icon for setup.'
+        Assert-True ($scriptText.Contains('IconFilename: "{app}\assets\astrid.ico"')) 'Installer shortcuts must use the packaged Astrid icon.'
 
         $scriptLines = @(Get-Content -LiteralPath $scriptPath)
         Assert-True ($scriptLines -contains "OutputDir=$outputDir") 'Installer OutputDir directive must stay on one line.'
