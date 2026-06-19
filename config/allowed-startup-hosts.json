@@ -1,0 +1,20 @@
+{
+  "allowed_hosts": [
+    "addons.mozilla.org",
+    "content-signature-2.cdn.mozilla.net",
+    "firefox-settings-attachments.cdn.mozilla.net",
+    "firefox.settings.services.mozilla.com",
+    "google.com",
+    "safebrowsing.googleapis.com",
+    "tracking-protection.cdn.mozilla.net",
+    "ublockorigin.github.io",
+    "easylist.to",
+    "secure.fanboy.co.nz",
+    "raw.githubusercontent.com"
+  ],
+  "notes": [
+    "This allow-list is for optional strict runtime verification.",
+    "Product telemetry, sponsored suggestions, Pocket, Normandy, and Mozilla ad endpoints are intentionally excluded.",
+    "Filter-list hosts can change as uBlock Origin updates its selected lists."
+  ]
+}

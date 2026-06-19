@@ -1,0 +1,18 @@
+.agents/
+.codex/
+.worktrees/
+worktrees/
+
+# Local Firefox source/builds live outside this repo by default.
+mozilla-source/
+obj-*/
+
+# Local launch profiles and logs.
+profiles/
+*.log
+
+# PowerShell/editor noise.
+*.ps1xml
+*.psd1~
+*.psm1~
+.vscode/
