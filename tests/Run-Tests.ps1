@@ -389,6 +389,16 @@ Invoke-Test 'installed updater checks GitHub releases and verifies package hashe
     Assert-True ($updaterText.Contains('astrid-version.json')) 'Updater must compare against installed version metadata.'
 }
 
+Invoke-Test 'release publisher creates a draft, uploads assets, and then publishes' {
+    $publisherPath = Join-Path $RepoRoot 'scripts\publish-release.ps1'
+    $publisherText = Get-Content -LiteralPath $publisherPath -Raw
+
+    Assert-True ($publisherText.Contains("'--draft'")) 'Publisher must create the release as a draft before uploading assets.'
+    Assert-True ($publisherText.Contains('gh release upload')) 'Publisher must upload assets after draft creation.'
+    Assert-True ($publisherText.Contains('gh @editArgs')) 'Publisher must edit the release after uploads.'
+    Assert-True ($publisherText.Contains("'--draft=false'")) 'Publisher must publish the draft after successful uploads.'
+}
+
 if ($script:Failures -gt 0) {
     Write-Host "$script:Failures test(s) failed."
     exit 1

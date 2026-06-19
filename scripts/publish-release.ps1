@@ -64,25 +64,45 @@ $notes = @(
 )
 Set-Content -LiteralPath $notesPath -Value $notes -Encoding UTF8
 
-$args = @(
+$createArgs = @(
     'release', 'create', $tagName,
-    $installerPath,
-    $packagePath,
-    $manifestPath,
     '--repo', $Repository,
     '--title', "Astrid $Version",
-    '--notes-file', $notesPath
+    '--notes-file', $notesPath,
+    '--draft'
 )
-if ($Draft) {
-    $args += '--draft'
-}
 if ($Prerelease) {
-    $args += '--prerelease'
+    $createArgs += '--prerelease'
 }
 
-& gh @args
+& gh @createArgs
 if ($LASTEXITCODE -ne 0) {
-    throw "Could not create GitHub release '$tagName'."
+    throw "Could not create draft GitHub release '$tagName'."
+}
+
+foreach ($assetPath in @($manifestPath, $packagePath, $installerPath)) {
+    & gh release upload $tagName $assetPath --repo $Repository
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not upload release asset '$assetPath'."
+    }
+}
+
+if (-not $Draft) {
+    $editArgs = @(
+        'release', 'edit', $tagName,
+        '--repo', $Repository,
+        '--title', "Astrid $Version",
+        '--notes-file', $notesPath,
+        '--draft=false'
+    )
+    if (-not $Prerelease) {
+        $editArgs += '--latest'
+    }
+
+    & gh @editArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not publish draft GitHub release '$tagName'."
+    }
 }
 
 Write-Host "Published $Repository release $tagName."
