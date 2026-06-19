@@ -1,6 +1,6 @@
 param(
     [string] $SourceDir,
-    [string] $FirefoxExe,
+    [string] $BrowserExe,
     [string] $ProfileDir,
     [string] $Url = 'about:blank',
     [switch] $CleanProfile,
@@ -19,14 +19,14 @@ if ([string]::IsNullOrWhiteSpace($SourceDir)) {
 if ([string]::IsNullOrWhiteSpace($ProfileDir)) {
     $ProfileDir = Join-Path $env:LOCALAPPDATA 'Astrid\dev-profile'
 }
-if ([string]::IsNullOrWhiteSpace($FirefoxExe)) {
-    $FirefoxExe = Get-AstridFirefoxExecutable -SourceDir $SourceDir
+if ([string]::IsNullOrWhiteSpace($BrowserExe)) {
+    $BrowserExe = Get-AstridBrowserExecutable -SourceDir $SourceDir
 }
-if ([string]::IsNullOrWhiteSpace($FirefoxExe) -or -not (Test-Path -LiteralPath $FirefoxExe -PathType Leaf)) {
-    throw "Could not find a built Astrid browser executable. Run scripts/build.ps1 first or pass -FirefoxExe."
+if ([string]::IsNullOrWhiteSpace($BrowserExe) -or -not (Test-Path -LiteralPath $BrowserExe -PathType Leaf)) {
+    throw "Could not find a built Astrid browser executable. Run scripts/build.ps1 first or pass -BrowserExe."
 }
 
-$runtimeDistribution = Install-AstridRuntimeDistribution -RepoRoot $RepoRoot -SourceDir $SourceDir -BrowserExe $FirefoxExe
+$runtimeDistribution = Install-AstridRuntimeDistribution -RepoRoot $RepoRoot -SourceDir $SourceDir -BrowserExe $BrowserExe
 
 $profileFullPath = [System.IO.Path]::GetFullPath($ProfileDir)
 $allowedProfileRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Astrid'))
@@ -48,7 +48,8 @@ $args = @(
     $Url
 ) + $AdditionalArgs
 
-Write-Host "Launching Astrid from $FirefoxExe"
+Write-Host "Launching Astrid from $BrowserExe"
 Write-Host "Policies: $($runtimeDistribution.PolicyPath)"
+Write-Host "Start page: $($runtimeDistribution.StartPagePath)"
 Write-Host "Profile: $profileFullPath"
-Start-Process -FilePath $FirefoxExe -ArgumentList $args
+Start-Process -FilePath $BrowserExe -ArgumentList $args

@@ -1,10 +1,10 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:AstridDefaultSourceDir = 'C:\mozilla-source\astrid-firefox'
+$script:AstridDefaultSourceDir = 'C:\mozilla-source\astrid-browser'
 $script:AstridDefaultEsrRepo = 'https://hg.mozilla.org/releases/mozilla-esr140'
 $script:AstridUBlockId = 'uBlock0@raymondhill.net'
-$script:AstridUBlockRelativePath = 'third_party/ublock/ublock-origin.firefox.signed.xpi'
+$script:AstridUBlockRelativePath = 'third_party/ublock/ublock-origin.signed.xpi'
 $script:AstridBrowserExecutableNames = @('astrid.exe', 'firefox.exe')
 
 function Get-AstridDefaultSourceDir {
@@ -56,7 +56,7 @@ function Assert-AstridSafeSourcePath {
     $fullPath = [System.IO.Path]::GetFullPath($Path)
     $invalidPattern = '[\s''"&;|<>]'
     if ($fullPath -match $invalidPattern) {
-        throw "Firefox source checkout path '$fullPath' is unsafe. Use a short path without spaces, quotes, shell metacharacters, or redirection characters, such as '$script:AstridDefaultSourceDir'."
+        throw "Source checkout path '$fullPath' is unsafe. Use a short path without spaces, quotes, shell metacharacters, or redirection characters, such as '$script:AstridDefaultSourceDir'."
     }
 
     return $fullPath
@@ -173,7 +173,7 @@ function Get-AstridPythonPath {
     $python = Resolve-AstridCommandPath -Name 'python'
     $machPython = Test-MachPythonCandidate -CandidatePath $python
     if ($null -eq $machPython) {
-        throw "Python at '$python' is not compatible with Firefox Mach. Install Python 3.12 or make it available through the Python launcher."
+        throw "Python at '$python' is not compatible with mach. Install Python 3.12 or make it available through the Python launcher."
     }
 
     return $machPython.Path
@@ -290,6 +290,17 @@ function New-AstridAutoConfigPreferences {
         'datareporting.healthreport.infoURL' = ''
         'datareporting.healthreport.uploadEnabled' = $false
         'datareporting.sessions.current.clean' = $true
+        'identity.fxaccounts.enabled' = $false
+        'identity.fxaccounts.toolbar.enabled' = $false
+        'identity.fxaccounts.pairing.enabled' = $false
+        'services.sync.engine.addons' = $false
+        'services.sync.engine.bookmarks' = $false
+        'services.sync.engine.history' = $false
+        'services.sync.engine.passwords' = $false
+        'services.sync.engine.prefs' = $false
+        'services.sync.engine.tabs' = $false
+        'services.sync.serverURL' = ''
+        'services.sync.tokenServerURI' = ''
         'toolkit.coverage.endpoint.base' = ''
         'toolkit.coverage.opt-out' = $true
         'toolkit.telemetry.archive.enabled' = $false
@@ -351,7 +362,8 @@ function New-AstridPolicies {
     param(
         [Parameter(Mandatory)]
         [string] $RepoRoot,
-        [string] $BlockerXpiPath
+        [string] $BlockerXpiPath,
+        [string] $StartPagePath
     )
 
     if ([string]::IsNullOrWhiteSpace($BlockerXpiPath)) {
@@ -359,6 +371,10 @@ function New-AstridPolicies {
     }
 
     $blockerUri = ConvertTo-AstridFileUri -Path $BlockerXpiPath
+    $startPageUri = ''
+    if (-not [string]::IsNullOrWhiteSpace($StartPagePath)) {
+        $startPageUri = ConvertTo-AstridFileUri -Path $StartPagePath
+    }
     $uboAdminSettings = New-AstridUBlockAdminSettingsJson
 
     $preferences = [ordered]@{
@@ -401,15 +417,16 @@ function New-AstridPolicies {
         'network.allow-experiments' = New-AstridLockedPreference $false
     }
 
-    return [ordered]@{
-        policies = [ordered]@{
+    $policies = [ordered]@{
+            DisableFirefoxAccounts = $true
             DisableFirefoxStudies = $true
             DisablePocket = $true
             DisableTelemetry = $true
             DontCheckDefaultBrowser = $true
+            NewTabPage = $false
             NoDefaultBookmarks = $true
             OfferToSaveLoginsDefault = $false
-            OverrideFirstRunPage = ''
+            OverrideFirstRunPage = $startPageUri
             OverridePostUpdatePage = ''
             SearchSuggestEnabled = $false
             FirefoxHome = [ordered]@{
@@ -441,6 +458,17 @@ function New-AstridPolicies {
             }
             Preferences = $preferences
         }
+
+    if (-not [string]::IsNullOrWhiteSpace($startPageUri)) {
+        $policies.Homepage = [ordered]@{
+            URL = $startPageUri
+            Locked = $true
+            StartPage = 'homepage-locked'
+        }
+    }
+
+    return [ordered]@{
+        policies = $policies
     }
 }
 
@@ -451,10 +479,11 @@ function Save-AstridPolicies {
         [string] $RepoRoot,
         [Parameter(Mandatory)]
         [string] $OutputPath,
-        [string] $BlockerXpiPath
+        [string] $BlockerXpiPath,
+        [string] $StartPagePath
     )
 
-    $policy = New-AstridPolicies -RepoRoot $RepoRoot -BlockerXpiPath $BlockerXpiPath
+    $policy = New-AstridPolicies -RepoRoot $RepoRoot -BlockerXpiPath $BlockerXpiPath -StartPagePath $StartPagePath
     $parent = Split-Path -Parent $OutputPath
     if (-not [string]::IsNullOrWhiteSpace($parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -478,6 +507,265 @@ function Write-AstridDistributionNote {
         'Do not hand-edit this directory; update scripts/lib/Astrid.psm1 instead.'
     )
     Set-Content -LiteralPath $OutputPath -Value $note -Encoding UTF8
+    return $OutputPath
+}
+
+function Save-AstridStartPage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $OutputPath,
+        [string] $RepoRoot
+    )
+
+    $parent = Split-Path -Parent $OutputPath
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    $iconHtml = '<div class="brand-mark fallback-mark" aria-hidden="true">A</div>'
+    if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
+        $iconSourcePath = Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'assets\retrowave_browser_icon.svg'
+        if (Test-Path -LiteralPath $iconSourcePath -PathType Leaf) {
+            $iconDestPath = Join-Path $parent 'astrid-start-icon.svg'
+            Copy-Item -LiteralPath $iconSourcePath -Destination $iconDestPath -Force
+            $iconHtml = '<img class="brand-mark image-mark" src="astrid-start-icon.svg" alt="" />'
+        }
+    }
+
+    $html = @'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Astrid Start</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #10131a;
+      --panel: #171c24;
+      --text: #f6f7fb;
+      --muted: #b9c2d2;
+      --line: #293241;
+      --cyan: #4fd7d4;
+      --rose: #ff5c8a;
+      --gold: #f7c45d;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      padding: clamp(24px, 5vw, 72px);
+      background:
+        radial-gradient(circle at top left, rgba(79, 215, 212, 0.18), transparent 32rem),
+        linear-gradient(135deg, #10131a 0%, #1a1320 52%, #121820 100%);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(980px, 100%);
+    }
+
+    .shell {
+      display: grid;
+      gap: 32px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .brand-mark {
+      width: 76px;
+      height: 76px;
+      flex: 0 0 auto;
+    }
+
+    .fallback-mark {
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(79, 215, 212, 0.24), rgba(255, 92, 138, 0.22));
+      color: var(--text);
+      font-size: 42px;
+      font-weight: 700;
+    }
+
+    .image-mark {
+      object-fit: contain;
+    }
+
+    h1,
+    h2,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(42px, 8vw, 92px);
+      font-weight: 760;
+      line-height: 0.95;
+    }
+
+    .mission {
+      max-width: 820px;
+      color: var(--muted);
+      font-size: clamp(20px, 3vw, 34px);
+      line-height: 1.22;
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    article {
+      min-height: 150px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(23, 28, 36, 0.78);
+    }
+
+    article h2 {
+      color: var(--text);
+      font-size: 17px;
+      font-weight: 720;
+    }
+
+    article p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.48;
+    }
+
+    .search {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(246, 247, 251, 0.06);
+    }
+
+    label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    input,
+    button {
+      min-height: 48px;
+      border: 0;
+      border-radius: 6px;
+      font: inherit;
+    }
+
+    input {
+      min-width: 0;
+      padding: 0 16px;
+      background: #0c1016;
+      color: var(--text);
+      outline: 1px solid transparent;
+    }
+
+    input:focus {
+      outline-color: var(--cyan);
+    }
+
+    button {
+      padding: 0 18px;
+      background: linear-gradient(135deg, var(--cyan), var(--rose));
+      color: #071014;
+      font-weight: 740;
+      cursor: pointer;
+    }
+
+    .tagline {
+      color: var(--gold);
+      font-size: 14px;
+      font-weight: 720;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 720px) {
+      body {
+        place-items: start;
+      }
+
+      .principles,
+      .search {
+        grid-template-columns: 1fr;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="brand" aria-label="Astrid">
+      @@ICON@@
+      <div>
+        <p class="tagline">Private by default. Quiet by design.</p>
+        <h1>Astrid</h1>
+      </div>
+    </section>
+
+    <p class="mission">Astrid exists to make the web quiet again: a personal browser that starts from privacy, removes telemetry and promotional surfaces, and keeps control local.</p>
+
+    <section class="principles" aria-label="Astrid principles">
+      <article>
+        <h2>No telemetry</h2>
+        <p>Product measurements, studies, experiments, and crash uploads are locked off.</p>
+      </article>
+      <article>
+        <h2>No promotions</h2>
+        <p>Sponsored shortcuts, stories, snippets, and address-bar promo surfaces stay out of the way.</p>
+      </article>
+      <article>
+        <h2>Local control</h2>
+        <p>Updates are manual in v1, blocking is bundled, and the default page is this local file.</p>
+      </article>
+    </section>
+
+    <form class="search" action="https://duckduckgo.com/" method="get">
+      <label for="astrid-search">Search the web</label>
+      <input id="astrid-search" name="q" type="search" autocomplete="off" placeholder="Search the web">
+      <button type="submit">Search</button>
+    </form>
+  </main>
+</body>
+</html>
+'@
+
+    $html = $html.Replace('@@ICON@@', $iconHtml)
+    Set-Content -LiteralPath $OutputPath -Value $html -Encoding UTF8
     return $OutputPath
 }
 
@@ -566,7 +854,7 @@ function Test-AstridAutoConfig {
         $appPrivacyDefaultsText = Get-Content -LiteralPath $appPrivacyDefaultsPrefPath -Raw
         $configText = Get-Content -LiteralPath $configPath -Raw
         if ($defaultsText -notmatch 'general\.config\.filename' -or $defaultsText -notmatch 'astrid\.cfg') {
-            $failures.Add('AutoConfig defaults file must point Firefox at astrid.cfg.')
+            $failures.Add('AutoConfig defaults file must point the browser at astrid.cfg.')
         }
 
         foreach ($entry in (New-AstridAutoConfigPreferences).GetEnumerator()) {
@@ -651,10 +939,34 @@ function Test-AstridPolicies {
         $failures.Add('Root object must contain a policies property.')
     }
 
-    $requiredTrue = @('DisableTelemetry', 'DisableFirefoxStudies', 'DisablePocket')
+    $requiredTrue = @('DisableTelemetry', 'DisableFirefoxAccounts', 'DisableFirefoxStudies', 'DisablePocket')
     foreach ($name in $requiredTrue) {
         if ((Get-AstridObjectProperty -Object $policies -Name $name) -ne $true) {
             $failures.Add("$name must be true.")
+        }
+    }
+
+    if ((Get-AstridObjectProperty -Object $policies -Name 'NewTabPage') -ne $false) {
+        $failures.Add('NewTabPage must be false.')
+    }
+
+    $homepage = Get-AstridObjectProperty -Object $policies -Name 'Homepage'
+    if ($null -ne $homepage) {
+        $homepageUrl = Get-AstridObjectProperty -Object $homepage -Name 'URL'
+        if ([string]::IsNullOrWhiteSpace($homepageUrl) -or -not $homepageUrl.StartsWith('file:///')) {
+            $failures.Add('Homepage URL must be a local file URI.')
+        }
+
+        if ((Get-AstridObjectProperty -Object $homepage -Name 'Locked') -ne $true) {
+            $failures.Add('Homepage must be locked.')
+        }
+
+        if ((Get-AstridObjectProperty -Object $homepage -Name 'StartPage') -ne 'homepage-locked') {
+            $failures.Add('Homepage StartPage must be homepage-locked.')
+        }
+
+        if ((Get-AstridObjectProperty -Object $policies -Name 'OverrideFirstRunPage') -ne $homepageUrl) {
+            $failures.Add('OverrideFirstRunPage must match the local homepage URL.')
         }
     }
 
@@ -741,14 +1053,17 @@ function Install-AstridDistribution {
 
     $safeSourceDir = Assert-AstridSafeSourcePath -Path $SourceDir
     if (-not (Test-Path -LiteralPath $safeSourceDir -PathType Container)) {
-        throw "Firefox source directory '$safeSourceDir' does not exist. Run scripts/bootstrap.ps1 first."
+        throw "Source directory '$safeSourceDir' does not exist. Run scripts/bootstrap.ps1 first."
     }
 
     $distributionDir = Join-Path $safeSourceDir 'distribution'
     New-Item -ItemType Directory -Path $distributionDir -Force | Out-Null
 
+    $startPagePath = Join-Path $distributionDir 'astrid-start.html'
+    Save-AstridStartPage -OutputPath $startPagePath -RepoRoot $RepoRoot | Out-Null
+
     $policyPath = Join-Path $distributionDir 'policies.json'
-    Save-AstridPolicies -RepoRoot $RepoRoot -OutputPath $policyPath | Out-Null
+    Save-AstridPolicies -RepoRoot $RepoRoot -OutputPath $policyPath -StartPagePath $startPagePath | Out-Null
 
     $notePath = Join-Path $distributionDir 'ASTRID.txt'
     Write-AstridDistributionNote -OutputPath $notePath | Out-Null
@@ -756,6 +1071,7 @@ function Install-AstridDistribution {
     return [pscustomobject]@{
         DistributionDir = $distributionDir
         PolicyPath = $policyPath
+        StartPagePath = $startPagePath
         NotePath = $notePath
     }
 }
@@ -771,7 +1087,7 @@ function Write-AstridMozConfig {
 
     $safeSourceDir = Assert-AstridSafeSourcePath -Path $SourceDir
     if (-not (Test-Path -LiteralPath $safeSourceDir -PathType Container)) {
-        throw "Firefox source directory '$safeSourceDir' does not exist. Run scripts/bootstrap.ps1 first."
+        throw "Source directory '$safeSourceDir' does not exist. Run scripts/bootstrap.ps1 first."
     }
 
     $mozconfigPath = Join-Path $safeSourceDir '.mozconfig'
@@ -826,7 +1142,7 @@ function Invoke-AstridPatches {
     foreach ($patch in $patches) {
         $status = & $hgPath --cwd $safeSourceDir status 2>$null
         if ($LASTEXITCODE -ne 0) {
-            throw "Could not inspect Mercurial source checkout at '$safeSourceDir'. Is Mercurial installed and is this a Firefox hg checkout?"
+            throw "Could not inspect Mercurial source checkout at '$safeSourceDir'. Is Mercurial installed and is this an upstream ESR hg checkout?"
         }
 
         & $hgPath --cwd $safeSourceDir import --no-commit $patch.FullName
@@ -840,7 +1156,7 @@ function Invoke-AstridPatches {
     return [string[]] $applied.ToArray()
 }
 
-function Get-AstridFirefoxExecutable {
+function Get-AstridBrowserExecutable {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -884,7 +1200,7 @@ function Install-AstridRuntimeDistribution {
             throw 'SourceDir is required when BrowserExe is not provided.'
         }
 
-        $BrowserExe = Get-AstridFirefoxExecutable -SourceDir $SourceDir
+        $BrowserExe = Get-AstridBrowserExecutable -SourceDir $SourceDir
     }
 
     if ([string]::IsNullOrWhiteSpace($BrowserExe) -or -not (Test-Path -LiteralPath $BrowserExe -PathType Leaf)) {
@@ -895,8 +1211,11 @@ function Install-AstridRuntimeDistribution {
     $distributionDir = Join-Path $browserDir 'distribution'
     New-Item -ItemType Directory -Path $distributionDir -Force | Out-Null
 
+    $startPagePath = Join-Path $distributionDir 'astrid-start.html'
+    Save-AstridStartPage -OutputPath $startPagePath -RepoRoot $RepoRoot | Out-Null
+
     $policyPath = Join-Path $distributionDir 'policies.json'
-    Save-AstridPolicies -RepoRoot $RepoRoot -OutputPath $policyPath | Out-Null
+    Save-AstridPolicies -RepoRoot $RepoRoot -OutputPath $policyPath -StartPagePath $startPagePath | Out-Null
 
     $notePath = Join-Path $distributionDir 'ASTRID.txt'
     Write-AstridDistributionNote -OutputPath $notePath | Out-Null
@@ -906,6 +1225,7 @@ function Install-AstridRuntimeDistribution {
     return [pscustomobject]@{
         DistributionDir = $distributionDir
         PolicyPath = $policyPath
+        StartPagePath = $startPagePath
         NotePath = $notePath
         AutoConfigDefaultsPrefPath = $autoConfig.DefaultsPrefPath
         PrivacyDefaultsPrefPath = $autoConfig.PrivacyDefaultsPrefPath
@@ -1308,7 +1628,7 @@ Export-ModuleMember -Function @(
     'ConvertTo-AstridFileUri',
     'Get-AstridDefaultEsrRepo',
     'Get-AstridDefaultSourceDir',
-    'Get-AstridFirefoxExecutable',
+    'Get-AstridBrowserExecutable',
     'Get-AstridInnoSetupCompilerPath',
     'Get-AstridInstallerAssetName',
     'Get-AstridMercurialPath',
@@ -1327,6 +1647,7 @@ Export-ModuleMember -Function @(
     'New-AstridPolicies',
     'New-AstridReleaseMetadata',
     'Save-AstridInstallerIcon',
+    'Save-AstridStartPage',
     'Save-AstridPolicies',
     'Save-AstridInnoSetupScript',
     'Save-AstridReleaseManifest',

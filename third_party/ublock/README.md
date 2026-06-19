@@ -1,6 +1,6 @@
 # uBlock Origin Bundle
 
-Run the update script to download and pin the signed Firefox XPI:
+Run the update script to download and pin the signed browser XPI:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-blocker.ps1 -AcceptGpl3
@@ -8,7 +8,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-blocker.ps1 -Acce
 
 Generated files:
 
-- `ublock-origin.firefox.signed.xpi`
+- `ublock-origin.signed.xpi`
 - `metadata.json`
 - `LICENSE.txt`
 

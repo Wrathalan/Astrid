@@ -77,9 +77,9 @@ function Invoke-Test {
 Invoke-Test 'safe source path validation rejects workspace paths with spaces or apostrophes' {
     Assert-Throws {
         Assert-AstridSafeSourcePath -Path $RepoRoot
-    } 'Expected the current workspace path to be rejected for Firefox source checkout use.'
+    } 'Expected the current workspace path to be rejected for source checkout use.'
 
-    [void] (Assert-AstridSafeSourcePath -Path 'C:\mozilla-source\astrid-firefox')
+    [void] (Assert-AstridSafeSourcePath -Path 'C:\mozilla-source\astrid-browser')
 }
 
 Invoke-Test 'policy generation disables telemetry, studies, Pocket, sponsored surfaces, and crash upload' {
@@ -90,12 +90,77 @@ Invoke-Test 'policy generation disables telemetry, studies, Pocket, sponsored su
     Assert-Equal $policy.policies.DisableTelemetry $true 'DisableTelemetry must be enabled.'
     Assert-Equal $policy.policies.DisableFirefoxStudies $true 'Firefox Studies must be disabled.'
     Assert-Equal $policy.policies.DisablePocket $true 'Pocket must be disabled.'
+    Assert-Equal $policy.policies.DisableFirefoxAccounts $true 'Account and sync integration must be disabled.'
     Assert-Equal $prefs.'datareporting.policy.dataSubmissionEnabled'.Value $false 'Data submission must be disabled.'
     Assert-Equal $autoConfigPrefs.'toolkit.telemetry.enabled' $false 'Telemetry must be disabled through AutoConfig.'
     Assert-Equal $autoConfigPrefs.'app.normandy.enabled' $false 'Normandy must be disabled through AutoConfig.'
     Assert-Equal $prefs.'browser.newtabpage.activity-stream.showSponsoredTopSites'.Value $false 'Sponsored top sites must be disabled.'
-    Assert-Equal $prefs.'browser.urlbar.suggest.quicksuggest.sponsored'.Value $false 'Sponsored Firefox Suggest results must be disabled.'
+    Assert-Equal $prefs.'browser.urlbar.suggest.quicksuggest.sponsored'.Value $false 'Sponsored address-bar results must be disabled.'
     Assert-Equal $prefs.'browser.tabs.crashReporting.sendReport'.Value $false 'Crash report submission must be disabled.'
+}
+
+Invoke-Test 'account and sync mechanics are locked off before startup' {
+    $autoConfigPrefs = New-AstridAutoConfigPreferences
+    $lockedFalsePrefs = @(
+        'identity.fxaccounts.enabled',
+        'identity.fxaccounts.toolbar.enabled',
+        'identity.fxaccounts.pairing.enabled',
+        'services.sync.engine.addons',
+        'services.sync.engine.bookmarks',
+        'services.sync.engine.history',
+        'services.sync.engine.passwords',
+        'services.sync.engine.prefs',
+        'services.sync.engine.tabs'
+    )
+
+    foreach ($prefName in $lockedFalsePrefs) {
+        Assert-Equal $autoConfigPrefs.$prefName $false "AutoConfig must lock '$prefName' off."
+    }
+
+    Assert-Equal $autoConfigPrefs.'services.sync.serverURL' '' 'Sync server URL must be blank.'
+    Assert-Equal $autoConfigPrefs.'services.sync.tokenServerURI' '' 'Sync token server URL must be blank.'
+}
+
+Invoke-Test 'start page generation writes local Astrid mission copy without upstream-facing terms' {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-start-" + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempRoot | Out-Null
+    try {
+        $startPagePath = Join-Path $tempRoot 'astrid-start.html'
+        [void] (Save-AstridStartPage -OutputPath $startPagePath -RepoRoot $RepoRoot)
+
+        Assert-True (Test-Path -LiteralPath $startPagePath -PathType Leaf) 'Start page must be written.'
+        $startPageText = Get-Content -LiteralPath $startPagePath -Raw
+        Assert-True ($startPageText.Contains('Astrid exists to make the web quiet again')) 'Start page must include the mission statement.'
+        Assert-True ($startPageText -notmatch '(?i)\bfirefox\b') 'Start page must not use Firefox wording.'
+        Assert-True ($startPageText -notmatch '(?i)\bmozilla\b') 'Start page must not use Mozilla wording.'
+        Assert-True ($startPageText -notmatch '(?i)sign\s*in') 'Start page must not invite sign in.'
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-Test 'policies use the local Astrid mission page for startup' {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-home-" + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempRoot | Out-Null
+    try {
+        $startPagePath = Join-Path $tempRoot 'astrid-start.html'
+        [void] (Save-AstridStartPage -OutputPath $startPagePath -RepoRoot $RepoRoot)
+        $policyPath = Join-Path $tempRoot 'policies.json'
+        [void] (Save-AstridPolicies -RepoRoot $RepoRoot -OutputPath $policyPath -StartPagePath $startPagePath)
+
+        $expectedStartPageUri = ConvertTo-AstridFileUri -Path $startPagePath
+        $loaded = Get-Content -LiteralPath $policyPath -Raw | ConvertFrom-Json
+        Assert-Equal $loaded.policies.Homepage.URL $expectedStartPageUri 'Homepage policy must point to the local Astrid start page.'
+        Assert-Equal $loaded.policies.Homepage.Locked $true 'Homepage policy must be locked.'
+        Assert-Equal $loaded.policies.Homepage.StartPage 'homepage-locked' 'Startup must use the locked homepage.'
+        Assert-Equal $loaded.policies.OverrideFirstRunPage $expectedStartPageUri 'First-run page must be the Astrid mission page.'
+        Assert-Equal $loaded.policies.NewTabPage $false 'Default sponsored-content new tab surface must be disabled.'
+
+        $result = Test-AstridPolicies -PolicyPath $policyPath
+        Assert-Equal $result.Passed $true 'Policies with the Astrid start page must pass static verification.'
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Invoke-Test 'uBlock Origin is force installed from a local pinned XPI and extension package updates are disabled' {
@@ -103,7 +168,7 @@ Invoke-Test 'uBlock Origin is force installed from a local pinned XPI and extens
     $ubo = $policy.policies.ExtensionSettings.'uBlock0@raymondhill.net'
 
     Assert-Equal $ubo.installation_mode 'force_installed' 'uBlock Origin must be force installed.'
-    Assert-True ($ubo.install_url -like 'file:///*/third_party/ublock/ublock-origin.firefox.signed.xpi') 'uBlock Origin install_url must point at the local pinned XPI.'
+    Assert-True ($ubo.install_url -like 'file:///*/third_party/ublock/ublock-origin.signed.xpi') 'uBlock Origin install_url must point at the local pinned XPI.'
     Assert-Equal $ubo.updates_disabled $true 'The uBlock Origin extension package must not auto-update from AMO.'
 }
 
@@ -178,11 +243,11 @@ Invoke-Test 'browser executable resolver prefers branded Astrid binaries' {
     New-Item -ItemType Directory -Path $binDir | Out-Null
     try {
         $astridExe = Join-Path $binDir 'astrid.exe'
-        $firefoxExe = Join-Path $binDir 'firefox.exe'
+        $fallbackExe = Join-Path $binDir 'firefox.exe'
         Set-Content -LiteralPath $astridExe -Value '' -Encoding Ascii
-        Set-Content -LiteralPath $firefoxExe -Value '' -Encoding Ascii
+        Set-Content -LiteralPath $fallbackExe -Value '' -Encoding Ascii
 
-        $resolved = Get-AstridFirefoxExecutable -SourceDir $tempRoot
+        $resolved = Get-AstridBrowserExecutable -SourceDir $tempRoot
         Assert-Equal $resolved $astridExe 'Executable resolver must prefer astrid.exe over the compatibility fallback.'
     } finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -200,9 +265,13 @@ Invoke-Test 'runtime distribution writes policies next to the browser executable
         $runtimeDistribution = Install-AstridRuntimeDistribution -RepoRoot $RepoRoot -BrowserExe $astridExe
         Assert-Equal $runtimeDistribution.DistributionDir (Join-Path $binDir 'distribution') 'Runtime distribution must live beside the browser executable.'
         Assert-True (Test-Path -LiteralPath $runtimeDistribution.PolicyPath -PathType Leaf) 'Runtime policies.json must be written.'
+        Assert-True (Test-Path -LiteralPath $runtimeDistribution.StartPagePath -PathType Leaf) 'Runtime start page must be written.'
 
         $result = Test-AstridPolicies -PolicyPath $runtimeDistribution.PolicyPath
         Assert-Equal $result.Passed $true 'Runtime policies must pass static verification.'
+
+        $runtimePolicies = Get-Content -LiteralPath $runtimeDistribution.PolicyPath -Raw | ConvertFrom-Json
+        Assert-Equal $runtimePolicies.policies.Homepage.URL (ConvertTo-AstridFileUri -Path $runtimeDistribution.StartPagePath) 'Runtime policies must point to the generated start page.'
     } finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -262,13 +331,15 @@ Invoke-Test 'runtime distribution writes AutoConfig locks for internal privacy p
         $privacyDefaultsText = Get-Content -LiteralPath $privacyDefaultsPref -Raw
         $appPrivacyDefaultsText = Get-Content -LiteralPath $appPrivacyDefaultsPref -Raw
         $configText = Get-Content -LiteralPath $configFile -Raw
-        Assert-True ($defaultsText -match 'general\.config\.filename') 'AutoConfig defaults must point Firefox at astrid.cfg.'
+        Assert-True ($defaultsText -match 'general\.config\.filename') 'AutoConfig defaults must point the browser at astrid.cfg.'
         Assert-True ($privacyDefaultsText.Contains('pref("app.shield.optoutstudies.enabled", false);')) 'Privacy defaults must disable studies before Nimbus startup.'
         Assert-True ($appPrivacyDefaultsText.Contains('pref("app.shield.optoutstudies.enabled", false);')) 'App privacy defaults must override Firefox bundled study defaults.'
         Assert-True ($privacyDefaultsText.Contains('pref("datareporting.healthreport.uploadEnabled", false);')) 'Privacy defaults must disable upload before Nimbus startup.'
         Assert-True ($configText.Contains('lockPref("app.normandy.enabled", false);')) 'AutoConfig must lock Normandy off.'
         Assert-True ($configText.Contains('lockPref("toolkit.telemetry.unified", false);')) 'AutoConfig must lock unified telemetry off.'
         Assert-True ($configText.Contains('lockPref("datareporting.healthreport.uploadEnabled", false);')) 'AutoConfig must lock health report upload off.'
+        Assert-True ($configText.Contains('lockPref("identity.fxaccounts.enabled", false);')) 'AutoConfig must lock account integration off.'
+        Assert-True ($configText.Contains('lockPref("services.sync.engine.bookmarks", false);')) 'AutoConfig must lock sync engines off.'
     } finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -345,6 +416,10 @@ Invoke-Test 'package staging writes updater and installed version metadata' {
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'AstridUpdateCheck.cmd') -PathType Leaf) 'Staging must include the updater launcher.'
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'assets\retrowave_browser_icon_512.png') -PathType Leaf) 'Staging must include Astrid icon assets.'
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'assets\astrid.ico') -PathType Leaf) 'Staging must create the Windows installer icon.'
+
+        $packageReadme = Get-Content -LiteralPath (Join-Path $staged.AppDir 'README-Astrid.txt') -Raw
+        Assert-True ($packageReadme -notmatch '(?i)\bfirefox\b') 'Package README must not use Firefox-facing wording.'
+        Assert-True ($packageReadme -notmatch '(?i)sign\s*in') 'Package README must not include sign-in language.'
 
         $versionInfo = Get-Content -LiteralPath (Join-Path $staged.AppDir 'astrid-version.json') -Raw | ConvertFrom-Json
         Assert-Equal $versionInfo.version '1.0.0' 'Installed version metadata must record the installed version.'

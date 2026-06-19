@@ -1,7 +1,7 @@
 param(
     [string] $SourceDir,
     [string] $PolicyPath,
-    [string] $FirefoxExe,
+    [string] $BrowserExe,
     [int] $RuntimeSeconds = 0,
     [string] $HostLogPath,
     [string] $AllowedHostsPath,
@@ -17,12 +17,12 @@ Import-Module (Join-Path $RepoRoot 'scripts/lib/Astrid.psm1') -Force
 if ([string]::IsNullOrWhiteSpace($SourceDir)) {
     $SourceDir = Get-AstridDefaultSourceDir
 }
-if ([string]::IsNullOrWhiteSpace($FirefoxExe)) {
-    $FirefoxExe = Get-AstridFirefoxExecutable -SourceDir $SourceDir
+if ([string]::IsNullOrWhiteSpace($BrowserExe)) {
+    $BrowserExe = Get-AstridBrowserExecutable -SourceDir $SourceDir
 }
 if ([string]::IsNullOrWhiteSpace($PolicyPath)) {
-    if (-not [string]::IsNullOrWhiteSpace($FirefoxExe)) {
-        $runtimeDistribution = Install-AstridRuntimeDistribution -RepoRoot $RepoRoot -SourceDir $SourceDir -BrowserExe $FirefoxExe
+    if (-not [string]::IsNullOrWhiteSpace($BrowserExe)) {
+        $runtimeDistribution = Install-AstridRuntimeDistribution -RepoRoot $RepoRoot -SourceDir $SourceDir -BrowserExe $BrowserExe
         $PolicyPath = $runtimeDistribution.PolicyPath
     } else {
         $PolicyPath = Join-Path $SourceDir 'distribution/policies.json'
@@ -43,8 +43,8 @@ if (-not $result.Passed) {
 
 Write-Host "Static policy verification passed for $PolicyPath"
 
-if (-not [string]::IsNullOrWhiteSpace($FirefoxExe)) {
-    $browserDir = Split-Path -Parent ([System.IO.Path]::GetFullPath($FirefoxExe))
+if (-not [string]::IsNullOrWhiteSpace($BrowserExe)) {
+    $browserDir = Split-Path -Parent ([System.IO.Path]::GetFullPath($BrowserExe))
     $autoConfigResult = Test-AstridAutoConfig -BrowserDir $browserDir
     if (-not $autoConfigResult.Passed) {
         Write-Host 'AutoConfig verification failed:'
@@ -62,8 +62,8 @@ if ($RuntimeSeconds -le 0) {
     exit 0
 }
 
-if ([string]::IsNullOrWhiteSpace($FirefoxExe) -or -not (Test-Path -LiteralPath $FirefoxExe -PathType Leaf)) {
-    throw 'Runtime verification requested, but no Firefox executable was found.'
+if ([string]::IsNullOrWhiteSpace($BrowserExe) -or -not (Test-Path -LiteralPath $BrowserExe -PathType Leaf)) {
+    throw 'Runtime verification requested, but no Astrid executable was found.'
 }
 
 if ([string]::IsNullOrWhiteSpace($HostLogPath)) {
@@ -88,7 +88,7 @@ $forbiddenPatterns = @(
 try {
     $runtimeStartedAt = Get-Date
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $FirefoxExe
+    $psi.FileName = $BrowserExe
     $psi.UseShellExecute = $false
     $psi.ArgumentList.Add('-no-remote') | Out-Null
     $psi.ArgumentList.Add('-profile') | Out-Null
@@ -150,10 +150,10 @@ try {
         Write-Host "Runtime network verification completed with no HTTP log entries. Logs: $($createdLogFiles -join ', ')"
     }
 } finally {
-    if (-not [string]::IsNullOrWhiteSpace($FirefoxExe)) {
-        $firefoxFullPath = [System.IO.Path]::GetFullPath($FirefoxExe)
-        $verificationProcesses = @(Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($firefoxFullPath)) -ErrorAction SilentlyContinue |
-            Where-Object { $_.Path -eq $firefoxFullPath -and $_.StartTime -ge $runtimeStartedAt })
+    if (-not [string]::IsNullOrWhiteSpace($BrowserExe)) {
+        $browserFullPath = [System.IO.Path]::GetFullPath($BrowserExe)
+        $verificationProcesses = @(Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($browserFullPath)) -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -eq $browserFullPath -and $_.StartTime -ge $runtimeStartedAt })
         foreach ($verificationProcess in $verificationProcesses) {
             Stop-Process -Id $verificationProcess.Id -Force -ErrorAction SilentlyContinue
         }

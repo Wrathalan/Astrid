@@ -1,19 +1,20 @@
-# Astrid Firefox Fork
+# Astrid Browser
 
-Astrid is a personal Windows desktop Firefox ESR fork focused on removing telemetry, browser advertising surfaces, and product callbacks while staying close enough to upstream ESR to keep security maintenance practical.
+Astrid is a personal Windows desktop browser fork focused on removing telemetry, browser advertising surfaces, account hooks, and product callbacks while staying close enough to upstream ESR to keep security maintenance practical.
 
-This repository is the orchestration repo. The Firefox source checkout should live outside this path because Mozilla's Windows build tooling is sensitive to spaces and shell-special characters in source paths.
+This repository is the orchestration repo. The upstream source checkout should live outside this path because the Windows build tooling is sensitive to spaces and shell-special characters in source paths.
 
 Default source checkout:
 
 ```powershell
-C:\mozilla-source\astrid-firefox
+C:\mozilla-source\astrid-browser
 ```
 
 ## What V1 Does
 
-- Tracks Firefox ESR 140 via `https://hg.mozilla.org/releases/mozilla-esr140`.
-- Generates a locked `distribution/policies.json` that disables telemetry, Firefox Studies, Normandy, Pocket, sponsored new-tab content, sponsored/online Firefox Suggest, crash upload, onboarding promos, snippets, and related product callbacks.
+- Tracks upstream ESR 140 via `https://hg.mozilla.org/releases/mozilla-esr140`.
+- Generates a locked `distribution/policies.json` that disables telemetry, account and sync integration, studies, Normandy, Pocket, sponsored new-tab content, sponsored/online address-bar suggestions, crash upload, onboarding promos, snippets, and related product callbacks.
+- Installs a local Astrid start page with the project mission statement and locks startup to that page.
 - Bundles uBlock Origin as a local, force-installed XPI.
 - Allows uBlock filter lists to update automatically, while keeping extension package updates manual through `scripts/update-blocker.ps1`.
 - Builds a per-user Windows installer and updater package for v1 releases.
@@ -39,7 +40,7 @@ If Mercurial or Python are missing, either install them manually or re-run boots
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1 -InstallPrerequisites
 ```
 
-The first Firefox build can take a long time and requires Mozilla's Windows build prerequisites, including Visual Studio Build Tools and a supported Rust toolchain. `mach bootstrap` handles much of that setup.
+The first Astrid build can take a long time and requires the upstream Windows build prerequisites, including Visual Studio Build Tools and a supported Rust toolchain. `mach bootstrap` handles much of that setup.
 
 ## Verification
 
@@ -89,8 +90,8 @@ Installed builds include `AstridUpdateCheck.cmd`. Running it checks `https://api
 
 Put source-level changes in `patches/*.patch`. `scripts/build.ps1` applies them in filename order with `hg import --no-commit`.
 
-V1 intentionally keeps source patches minimal. Privacy and ad-removal defaults live in generated enterprise policy and locked preferences so Astrid can rebase onto Firefox ESR with less churn.
+V1 intentionally keeps source patches minimal. Privacy and ad-removal defaults live in generated enterprise policy and locked preferences so Astrid can rebase onto upstream ESR with less churn.
 
 ## Trademark Note
 
-Astrid is a personal modified build and is not distributed as Mozilla Firefox. Before any public redistribution, review Mozilla's trademark policy and replace any Mozilla branding that a public derivative build cannot use.
+Astrid is a personal modified build and is not an upstream-branded product. Before any public redistribution, review the upstream trademark policy and replace any branding that a public derivative build cannot use.

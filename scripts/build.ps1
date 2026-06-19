@@ -19,10 +19,10 @@ if ([string]::IsNullOrWhiteSpace($SourceDir)) {
 
 $SourceDir = Assert-AstridSafeSourcePath -Path $SourceDir
 if (-not (Test-Path -LiteralPath $SourceDir -PathType Container)) {
-    throw "Firefox source directory '$SourceDir' does not exist. Run scripts/bootstrap.ps1 first."
+    throw "Source directory '$SourceDir' does not exist. Run scripts/bootstrap.ps1 first."
 }
 
-$blockerXpi = Join-Path $RepoRoot 'third_party/ublock/ublock-origin.firefox.signed.xpi'
+$blockerXpi = Join-Path $RepoRoot 'third_party/ublock/ublock-origin.signed.xpi'
 if (-not $AllowMissingBlocker -and -not (Test-Path -LiteralPath $blockerXpi -PathType Leaf)) {
     throw "Missing bundled uBlock Origin XPI at '$blockerXpi'. Run scripts/update-blocker.ps1 -AcceptGpl3 before building, or use -AllowMissingBlocker for policy-only testing."
 }
@@ -43,7 +43,7 @@ if (-not $SkipPatches) {
 }
 
 if ($NoBuild) {
-    $existingBrowserExe = Get-AstridFirefoxExecutable -SourceDir $SourceDir
+    $existingBrowserExe = Get-AstridBrowserExecutable -SourceDir $SourceDir
     if (-not [string]::IsNullOrWhiteSpace($existingBrowserExe)) {
         $runtimeDistribution = Install-AstridRuntimeDistribution -RepoRoot $RepoRoot -SourceDir $SourceDir -BrowserExe $existingBrowserExe
         Write-Host "Installed Astrid runtime policies to $($runtimeDistribution.PolicyPath)"
@@ -61,7 +61,7 @@ if (-not (Test-Path -LiteralPath $machPath -PathType Leaf)) {
 $pythonPath = Get-AstridPythonPath
 $hgPath = Get-AstridMercurialPath
 
-Write-Host 'Starting Firefox build. This can take a long time on first run.'
+Write-Host 'Starting Astrid build. This can take a long time on first run.'
 Push-Location -LiteralPath $SourceDir
 try {
     Initialize-AstridMozillaBuildEnvironment

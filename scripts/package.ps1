@@ -23,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDir)) {
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
 if ([string]::IsNullOrWhiteSpace($BrowserExe)) {
-    $BrowserExe = Get-AstridFirefoxExecutable -SourceDir $SourceDir
+    $BrowserExe = Get-AstridBrowserExecutable -SourceDir $SourceDir
 }
 
 if ([string]::IsNullOrWhiteSpace($BrowserExe) -or -not (Test-Path -LiteralPath $BrowserExe -PathType Leaf)) {

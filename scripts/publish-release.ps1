@@ -53,7 +53,7 @@ $notesPath = Join-Path $ArtifactsDir "release-notes-$Version.md"
 $notes = @(
     "# Astrid $Version",
     '',
-    'Personal Windows Firefox ESR fork package with Astrid privacy policy defaults, locked telemetry/product-callback preferences, bundled uBlock Origin, and a manual GitHub Releases updater.',
+    'Personal Windows Astrid browser package with privacy policy defaults, locked telemetry/product-callback preferences, bundled uBlock Origin, a local mission start page, and a manual GitHub Releases updater.',
     '',
     'Assets:',
     "- $(Split-Path -Leaf $installerPath): per-user installer",

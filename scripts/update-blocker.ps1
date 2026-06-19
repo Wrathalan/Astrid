@@ -21,7 +21,7 @@ if (-not $AcceptGpl3) {
 
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
-$xpiPath = Join-Path $OutputDir 'ublock-origin.firefox.signed.xpi'
+$xpiPath = Join-Path $OutputDir 'ublock-origin.signed.xpi'
 $metadataPath = Join-Path $OutputDir 'metadata.json'
 $licensePath = Join-Path $OutputDir 'LICENSE.txt'
 
@@ -55,7 +55,7 @@ try {
 
     $extensionId = $manifest.browser_specific_settings.gecko.id
     if ($extensionId -ne 'uBlock0@raymondhill.net') {
-        throw "Downloaded XPI has unexpected Firefox extension id '$extensionId'."
+        throw "Downloaded XPI has unexpected browser extension id '$extensionId'."
     }
 
     $hash = (Get-FileHash -LiteralPath $tempPath -Algorithm SHA256).Hash.ToLowerInvariant()

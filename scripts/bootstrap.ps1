@@ -44,7 +44,7 @@ try {
     if ($InstallPrerequisites) {
         Install-WithWinget -PackageId 'Mercurial.Mercurial'
     } else {
-        throw 'Mercurial (hg) is required to clone Firefox ESR. Re-run with -InstallPrerequisites or install Mercurial manually.'
+        throw 'Mercurial (hg) is required to clone upstream ESR. Re-run with -InstallPrerequisites or install Mercurial manually.'
     }
 }
 
@@ -71,13 +71,13 @@ if (-not $SkipClone) {
     if (-not (Test-Path -LiteralPath $SourceDir -PathType Container)) {
         $parent = Split-Path -Parent $SourceDir
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
-        Write-Host "Cloning Firefox ESR from $EsrRepo into $SourceDir"
+        Write-Host "Cloning upstream ESR from $EsrRepo into $SourceDir"
         & $hgPath clone $EsrRepo $SourceDir
         if ($LASTEXITCODE -ne 0) {
             throw "Mercurial clone failed for '$EsrRepo'."
         }
     } elseif (Test-Path -LiteralPath (Join-Path $SourceDir '.hg') -PathType Container) {
-        Write-Host "Updating existing Firefox ESR checkout at $SourceDir"
+        Write-Host "Updating existing upstream ESR checkout at $SourceDir"
         & $hgPath --cwd $SourceDir pull -u
         if ($LASTEXITCODE -ne 0) {
             throw "Mercurial pull/update failed for '$SourceDir'."
@@ -90,10 +90,10 @@ if (-not $SkipClone) {
 $machPath = Join-Path $SourceDir 'mach'
 if (-not $SkipMachBootstrap) {
     if (-not (Test-Path -LiteralPath $machPath -PathType Leaf)) {
-        throw "Could not find mach at '$machPath'. Clone the Firefox source first."
+        throw "Could not find mach at '$machPath'. Clone the upstream source first."
     }
 
-    Write-Host 'Running Firefox mach bootstrap for a browser build.'
+    Write-Host 'Running mach bootstrap for an Astrid browser build.'
     Push-Location -LiteralPath $SourceDir
     try {
         Initialize-AstridMozillaBuildEnvironment
@@ -110,4 +110,4 @@ if (-not $SkipMachBootstrap) {
     }
 }
 
-Write-Host "Astrid bootstrap complete. Firefox source: $SourceDir"
+Write-Host "Astrid bootstrap complete. Source: $SourceDir"

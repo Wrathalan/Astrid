@@ -14,13 +14,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-privacy.ps1
 
 ## Runtime Startup Verification
 
-Runtime verification launches a built Astrid binary with a temporary profile, enables Mozilla networking logs, waits for a fixed number of seconds, and scans the log for forbidden product-callback endpoints.
+Runtime verification launches a built Astrid binary with a temporary profile, enables HTTP networking logs, waits for a fixed number of seconds, and scans the log for forbidden product-callback endpoints.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-privacy.ps1 -RuntimeSeconds 20
 ```
 
-Use `-EnforceAllowList` only after checking the current Firefox ESR startup behavior, because security-service and filter-list hosts can shift over time.
+Use `-EnforceAllowList` only after checking current upstream ESR startup behavior, because security-service and filter-list hosts can shift over time.
 
 ## Manual Browser Checks
 
@@ -29,5 +29,6 @@ After launch:
 - `about:policies` should show active policies with no errors.
 - `about:addons` should show uBlock Origin installed and locked.
 - New tab should not show sponsored shortcuts, Pocket stories, or snippets.
-- Address bar suggestions should not include Firefox Suggest sponsored or online results.
+- Address bar suggestions should not include sponsored or online product results.
+- Startup should open the local Astrid mission page.
 - Crash reporting controls should be disabled or locked off.
