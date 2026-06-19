@@ -11,6 +11,9 @@ obj-*/
 profiles/
 *.log
 
+# Generated release packages.
+artifacts/
+
 # PowerShell/editor noise.
 *.ps1xml
 *.psd1~

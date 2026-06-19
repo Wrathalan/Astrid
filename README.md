@@ -16,6 +16,8 @@ C:\mozilla-source\astrid-firefox
 - Generates a locked `distribution/policies.json` that disables telemetry, Firefox Studies, Normandy, Pocket, sponsored new-tab content, sponsored/online Firefox Suggest, crash upload, onboarding promos, snippets, and related product callbacks.
 - Bundles uBlock Origin as a local, force-installed XPI.
 - Allows uBlock filter lists to update automatically, while keeping extension package updates manual through `scripts/update-blocker.ps1`.
+- Builds a per-user Windows installer and updater package for v1 releases.
+- Installs a manual updater that checks GitHub Releases only when launched.
 - Uses a small patch-stack workflow so Astrid can rebase onto ESR updates.
 
 ## Quick Start
@@ -57,6 +59,28 @@ Strict allow-list mode is available for follow-up hardening:
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-privacy.ps1 -RuntimeSeconds 20 -EnforceAllowList
 ```
+
+## Packaging And Updates
+
+Build the v1 release assets after `scripts/build.ps1` has produced a runnable browser:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1 -Version 1.0.0
+```
+
+This writes:
+
+- `AstridSetup-1.0.0-win64.exe`: per-user installer for `%LOCALAPPDATA%\Programs\Astrid`.
+- `Astrid-1.0.0-win64.zip`: updater payload.
+- `Astrid-1.0.0-release.json`: release manifest with SHA-256 hashes.
+
+Publish those assets to GitHub Releases:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-release.ps1 -Version 1.0.0
+```
+
+Installed builds include `AstridUpdateCheck.cmd`. Running it checks `https://api.github.com/repos/Wrathalan/Astrid/releases/latest`, downloads the release manifest and ZIP package, verifies the package SHA-256, and mirrors the verified files into the install directory. V1 does not run background update checks.
 
 ## Patch Stack
 

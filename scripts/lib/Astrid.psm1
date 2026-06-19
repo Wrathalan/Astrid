@@ -915,24 +915,319 @@ function Install-AstridRuntimeDistribution {
     }
 }
 
+function Get-AstridPackageAssetName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Version
+    )
+
+    return "Astrid-$Version-win64.zip"
+}
+
+function Get-AstridInstallerAssetName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Version
+    )
+
+    return "AstridSetup-$Version-win64.exe"
+}
+
+function Get-AstridReleaseManifestAssetName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Version
+    )
+
+    return "Astrid-$Version-release.json"
+}
+
+function New-AstridReleaseMetadata {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Version,
+        [string] $Repository = 'Wrathalan/Astrid',
+        [string] $Commit = '',
+        [string] $BuiltAtUtc
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BuiltAtUtc)) {
+        $BuiltAtUtc = [DateTime]::UtcNow.ToString('o')
+    }
+
+    return [ordered]@{
+        name = 'Astrid'
+        version = $Version
+        channel = 'v1'
+        platform = 'win64'
+        repository = $Repository
+        releaseApiUrl = "https://api.github.com/repos/$Repository/releases/latest"
+        commit = $Commit
+        builtAtUtc = $BuiltAtUtc
+        package = [ordered]@{
+            asset = Get-AstridPackageAssetName -Version $Version
+            sha256 = ''
+            bytes = 0
+        }
+        installer = [ordered]@{
+            asset = Get-AstridInstallerAssetName -Version $Version
+            sha256 = ''
+            bytes = 0
+        }
+    }
+}
+
+function Save-AstridReleaseManifest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Version,
+        [string] $Repository = 'Wrathalan/Astrid',
+        [string] $Commit = '',
+        [Parameter(Mandatory)]
+        [string] $PackagePath,
+        [Parameter(Mandatory)]
+        [string] $InstallerPath,
+        [Parameter(Mandatory)]
+        [string] $OutputPath
+    )
+
+    foreach ($path in @($PackagePath, $InstallerPath)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Release asset '$path' does not exist."
+        }
+    }
+
+    $metadata = New-AstridReleaseMetadata -Version $Version -Repository $Repository -Commit $Commit
+    $packageItem = Get-Item -LiteralPath $PackagePath
+    $installerItem = Get-Item -LiteralPath $InstallerPath
+    $metadata.package.asset = Split-Path -Leaf $PackagePath
+    $metadata.package.sha256 = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $metadata.package.bytes = $packageItem.Length
+    $metadata.installer.asset = Split-Path -Leaf $InstallerPath
+    $metadata.installer.sha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $metadata.installer.bytes = $installerItem.Length
+
+    $parent = Split-Path -Parent $OutputPath
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    Set-Content -LiteralPath $OutputPath -Value (($metadata | ConvertTo-Json -Depth 12) + [Environment]::NewLine) -Encoding UTF8
+    return $OutputPath
+}
+
+function Reset-AstridDirectory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path,
+        [Parameter(Mandatory)]
+        [string] $AllowedParent
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $allowedFullPath = [System.IO.Path]::GetFullPath($AllowedParent).TrimEnd('\')
+    $allowedPrefix = "$allowedFullPath\"
+    if (-not $fullPath.StartsWith($allowedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset '$fullPath' because it is outside allowed parent '$allowedFullPath'."
+    }
+
+    if (Test-Path -LiteralPath $fullPath) {
+        Remove-Item -LiteralPath $fullPath -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
+    return $fullPath
+}
+
+function New-AstridPackageStaging {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RepoRoot,
+        [Parameter(Mandatory)]
+        [string] $BrowserDir,
+        [Parameter(Mandatory)]
+        [string] $Version,
+        [string] $Repository = 'Wrathalan/Astrid',
+        [Parameter(Mandatory)]
+        [string] $StagingDir,
+        [string] $Commit = ''
+    )
+
+    $repoFullPath = [System.IO.Path]::GetFullPath($RepoRoot)
+    $browserFullPath = [System.IO.Path]::GetFullPath($BrowserDir)
+    if (-not (Test-Path -LiteralPath (Join-Path $browserFullPath 'astrid.exe') -PathType Leaf)) {
+        throw "Browser directory '$browserFullPath' does not contain astrid.exe."
+    }
+
+    $stagingParent = Split-Path -Parent ([System.IO.Path]::GetFullPath($StagingDir))
+    $stagingFullPath = Reset-AstridDirectory -Path $StagingDir -AllowedParent $stagingParent
+    $appDir = Join-Path $stagingFullPath 'app'
+    New-Item -ItemType Directory -Path $appDir -Force | Out-Null
+
+    foreach ($item in Get-ChildItem -LiteralPath $browserFullPath -Force) {
+        Copy-Item -LiteralPath $item.FullName -Destination $appDir -Recurse -Force
+    }
+
+    $installScriptsDir = Join-Path $repoFullPath 'scripts\install'
+    $updaterPath = Join-Path $installScriptsDir 'AstridUpdater.ps1'
+    $updaterLauncherPath = Join-Path $installScriptsDir 'AstridUpdateCheck.cmd'
+    foreach ($path in @($updaterPath, $updaterLauncherPath)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Missing installer support file '$path'."
+        }
+
+        Copy-Item -LiteralPath $path -Destination (Join-Path $appDir (Split-Path -Leaf $path)) -Force
+    }
+
+    $metadata = New-AstridReleaseMetadata -Version $Version -Repository $Repository -Commit $Commit
+    Set-Content -LiteralPath (Join-Path $appDir 'astrid-version.json') -Value (($metadata | ConvertTo-Json -Depth 12) + [Environment]::NewLine) -Encoding UTF8
+
+    $readme = @(
+        'Astrid browser',
+        '',
+        "Version: $Version",
+        "Updates: run AstridUpdateCheck.cmd to check $Repository on GitHub Releases.",
+        'The updater is manual in v1 so Astrid does not perform background product update checks.'
+    )
+    Set-Content -LiteralPath (Join-Path $appDir 'README-Astrid.txt') -Value $readme -Encoding UTF8
+
+    return [pscustomobject]@{
+        StagingDir = $stagingFullPath
+        AppDir = $appDir
+        VersionPath = Join-Path $appDir 'astrid-version.json'
+        UpdaterPath = Join-Path $appDir 'AstridUpdater.ps1'
+        UpdaterLauncherPath = Join-Path $appDir 'AstridUpdateCheck.cmd'
+    }
+}
+
+function ConvertTo-AstridInnoQuotedString {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Value
+    )
+
+    return [string]::Concat('"', ($Value -replace '"', '""'), '"')
+}
+
+function Save-AstridInnoSetupScript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Version,
+        [Parameter(Mandatory)]
+        [string] $StagingAppDir,
+        [Parameter(Mandatory)]
+        [string] $OutputDir,
+        [Parameter(Mandatory)]
+        [string] $ScriptPath
+    )
+
+    $stagingFullPath = [System.IO.Path]::GetFullPath($StagingAppDir)
+    if (-not (Test-Path -LiteralPath (Join-Path $stagingFullPath 'astrid.exe') -PathType Leaf)) {
+        throw "Staging app directory '$stagingFullPath' does not contain astrid.exe."
+    }
+
+    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    $sourceGlob = Join-Path $stagingFullPath '*'
+    $outputBaseName = [System.IO.Path]::GetFileNameWithoutExtension((Get-AstridInstallerAssetName -Version $Version))
+    $outputDirLine = [string]::Concat('OutputDir=', $OutputDir)
+    $outputBaseNameLine = [string]::Concat('OutputBaseFilename=', $outputBaseName)
+    $sourceLine = [string]::Concat(
+        'Source: ',
+        (ConvertTo-AstridInnoQuotedString -Value $sourceGlob),
+        '; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs'
+    )
+    $lines = @(
+        '#define MyAppName "Astrid"',
+        "#define MyAppVersion $(ConvertTo-AstridInnoQuotedString -Value $Version)",
+        '#define MyAppPublisher "Wrathalan"',
+        '#define MyAppExeName "astrid.exe"',
+        '',
+        '[Setup]',
+        'AppId={{2F3D61E2-4EA7-4B27-AB1E-A8F0D874D931}',
+        'AppName={#MyAppName}',
+        'AppVersion={#MyAppVersion}',
+        'AppPublisher={#MyAppPublisher}',
+        'DefaultDirName={localappdata}\Programs\Astrid',
+        'DefaultGroupName=Astrid',
+        'DisableProgramGroupPage=yes',
+        'PrivilegesRequired=lowest',
+        $outputDirLine,
+        $outputBaseNameLine,
+        'Compression=lzma2',
+        'SolidCompression=yes',
+        'WizardStyle=modern',
+        'ArchitecturesAllowed=x64',
+        'UninstallDisplayName=Astrid',
+        '',
+        '[Tasks]',
+        'Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked',
+        '',
+        '[Files]',
+        $sourceLine,
+        '',
+        '[Icons]',
+        'Name: "{group}\Astrid"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"',
+        'Name: "{group}\Check for Astrid Updates"; Filename: "{app}\AstridUpdateCheck.cmd"; WorkingDir: "{app}"',
+        'Name: "{autodesktop}\Astrid"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon',
+        '',
+        '[Run]',
+        'Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, ''&'', ''&&'')}}"; Flags: nowait postinstall skipifsilent'
+    )
+
+    $parent = Split-Path -Parent $ScriptPath
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    Set-Content -LiteralPath $ScriptPath -Value $lines -Encoding UTF8
+    return $ScriptPath
+}
+
+function Get-AstridInnoSetupCompilerPath {
+    [CmdletBinding()]
+    param()
+
+    return Resolve-AstridCommandPath -Name 'iscc' -KnownPaths @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+        'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+        'C:\Program Files\Inno Setup 6\ISCC.exe'
+    )
+}
+
 Export-ModuleMember -Function @(
     'Assert-AstridSafeSourcePath',
     'ConvertTo-AstridFileUri',
     'Get-AstridDefaultEsrRepo',
     'Get-AstridDefaultSourceDir',
     'Get-AstridFirefoxExecutable',
+    'Get-AstridInnoSetupCompilerPath',
+    'Get-AstridInstallerAssetName',
     'Get-AstridMercurialPath',
     'Get-AstridMozLogFiles',
+    'Get-AstridPackageAssetName',
     'Get-AstridPythonPath',
+    'Get-AstridReleaseManifestAssetName',
     'Get-AstridResponseUri',
     'Get-AstridRepoRoot',
     'Initialize-AstridMozillaBuildEnvironment',
     'Install-AstridDistribution',
     'Install-AstridRuntimeDistribution',
     'Invoke-AstridPatches',
+    'New-AstridPackageStaging',
     'New-AstridAutoConfigPreferences',
     'New-AstridPolicies',
+    'New-AstridReleaseMetadata',
     'Save-AstridPolicies',
+    'Save-AstridInnoSetupScript',
+    'Save-AstridReleaseManifest',
     'Test-AstridAutoConfig',
     'Test-AstridPolicies',
     'Resolve-AstridCommandPath',

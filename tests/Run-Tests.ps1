@@ -295,6 +295,100 @@ Invoke-Test 'MOZ log resolver accepts Firefox .moz_log suffix files' {
     }
 }
 
+Invoke-Test 'release metadata builds deterministic v1 GitHub asset names' {
+    $metadata = New-AstridReleaseMetadata -Version '1.0.0' -Repository 'Wrathalan/Astrid' -Commit 'abc123' -BuiltAtUtc '2026-06-19T00:00:00Z'
+
+    Assert-Equal $metadata.version '1.0.0' 'Release metadata must preserve the package version.'
+    Assert-Equal $metadata.repository 'Wrathalan/Astrid' 'Release metadata must preserve the GitHub repository.'
+    Assert-Equal $metadata.releaseApiUrl 'https://api.github.com/repos/Wrathalan/Astrid/releases/latest' 'Release metadata must point at the GitHub latest-release API.'
+    Assert-Equal $metadata.package.asset 'Astrid-1.0.0-win64.zip' 'Package asset name must be deterministic.'
+    Assert-Equal $metadata.installer.asset 'AstridSetup-1.0.0-win64.exe' 'Installer asset name must be deterministic.'
+}
+
+Invoke-Test 'release manifest records package and installer hashes' {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-release-" + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempRoot | Out-Null
+    try {
+        $packagePath = Join-Path $tempRoot 'Astrid-1.0.0-win64.zip'
+        $installerPath = Join-Path $tempRoot 'AstridSetup-1.0.0-win64.exe'
+        $manifestPath = Join-Path $tempRoot 'Astrid-1.0.0-release.json'
+        Set-Content -LiteralPath $packagePath -Value 'package payload' -Encoding Ascii
+        Set-Content -LiteralPath $installerPath -Value 'installer payload' -Encoding Ascii
+
+        [void] (Save-AstridReleaseManifest -Version '1.0.0' -Repository 'Wrathalan/Astrid' -Commit 'abc123' -PackagePath $packagePath -InstallerPath $installerPath -OutputPath $manifestPath)
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+
+        Assert-Equal $manifest.package.asset 'Astrid-1.0.0-win64.zip' 'Manifest must name the package asset.'
+        Assert-Equal $manifest.installer.asset 'AstridSetup-1.0.0-win64.exe' 'Manifest must name the installer asset.'
+        Assert-Equal $manifest.package.sha256 (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant() 'Manifest must include the package SHA256.'
+        Assert-Equal $manifest.installer.sha256 (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant() 'Manifest must include the installer SHA256.'
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-Test 'package staging writes updater and installed version metadata' {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-stage-" + [System.Guid]::NewGuid().ToString('N'))
+    $browserDir = Join-Path $tempRoot 'browser'
+    $stagingDir = Join-Path $tempRoot 'staging'
+    New-Item -ItemType Directory -Path $browserDir | Out-Null
+    try {
+        Set-Content -LiteralPath (Join-Path $browserDir 'astrid.exe') -Value 'fake browser' -Encoding Ascii
+        New-Item -ItemType Directory -Path (Join-Path $browserDir 'distribution') | Out-Null
+        Set-Content -LiteralPath (Join-Path $browserDir 'distribution\policies.json') -Value '{"policies":{}}' -Encoding Ascii
+
+        $staged = New-AstridPackageStaging -RepoRoot $RepoRoot -BrowserDir $browserDir -Version '1.0.0' -Repository 'Wrathalan/Astrid' -StagingDir $stagingDir -Commit 'abc123'
+
+        Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'astrid.exe') -PathType Leaf) 'Staging must copy the browser runtime.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'astrid-version.json') -PathType Leaf) 'Staging must write installed version metadata.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'AstridUpdater.ps1') -PathType Leaf) 'Staging must include the updater script.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'AstridUpdateCheck.cmd') -PathType Leaf) 'Staging must include the updater launcher.'
+
+        $versionInfo = Get-Content -LiteralPath (Join-Path $staged.AppDir 'astrid-version.json') -Raw | ConvertFrom-Json
+        Assert-Equal $versionInfo.version '1.0.0' 'Installed version metadata must record the installed version.'
+        Assert-Equal $versionInfo.repository 'Wrathalan/Astrid' 'Installed version metadata must record the update repository.'
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-Test 'installer script uses per-user install directory and updater shortcut' {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-inno-" + [System.Guid]::NewGuid().ToString('N'))
+    $stagingAppDir = Join-Path $tempRoot 'app'
+    $outputDir = Join-Path $tempRoot 'out'
+    $scriptPath = Join-Path $tempRoot 'Astrid.iss'
+    New-Item -ItemType Directory -Path $stagingAppDir | Out-Null
+    try {
+        Set-Content -LiteralPath (Join-Path $stagingAppDir 'astrid.exe') -Value 'fake browser' -Encoding Ascii
+        Set-Content -LiteralPath (Join-Path $stagingAppDir 'AstridUpdateCheck.cmd') -Value '@echo off' -Encoding Ascii
+
+        [void] (Save-AstridInnoSetupScript -Version '1.0.0' -StagingAppDir $stagingAppDir -OutputDir $outputDir -ScriptPath $scriptPath)
+        $scriptText = Get-Content -LiteralPath $scriptPath -Raw
+
+        Assert-True ($scriptText.Contains('DefaultDirName={localappdata}\Programs\Astrid')) 'Installer must default to a per-user writable install directory.'
+        Assert-True ($scriptText.Contains('AstridUpdateCheck.cmd')) 'Installer must create an updater shortcut.'
+        Assert-True ($scriptText.Contains('AstridSetup-1.0.0-win64')) 'Installer output name must include the release version.'
+
+        $scriptLines = @(Get-Content -LiteralPath $scriptPath)
+        Assert-True ($scriptLines -contains "OutputDir=$outputDir") 'Installer OutputDir directive must stay on one line.'
+        Assert-True (@($scriptLines | Where-Object { $_ -like 'Source: "*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs' }).Count -eq 1) 'Installer Source directive must stay on one line.'
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-Test 'installed updater checks GitHub releases and verifies package hashes' {
+    $updaterPath = Join-Path $RepoRoot 'scripts\install\AstridUpdater.ps1'
+    Assert-True (Test-Path -LiteralPath $updaterPath -PathType Leaf) 'Updater script must exist.'
+
+    $updaterText = Get-Content -LiteralPath $updaterPath -Raw
+    Assert-True ($updaterText.Contains('api.github.com/repos')) 'Updater must call the GitHub Releases API.'
+    Assert-True ($updaterText.Contains('browser_download_url')) 'Updater must download release assets from GitHub.'
+    Assert-True ($updaterText.Contains('Get-FileHash')) 'Updater must verify the downloaded package hash.'
+    Assert-True ($updaterText.Contains('Expand-Archive')) 'Updater must expand the verified package.'
+    Assert-True ($updaterText.Contains('astrid-version.json')) 'Updater must compare against installed version metadata.'
+}
+
 if ($script:Failures -gt 0) {
     Write-Host "$script:Failures test(s) failed."
     exit 1
