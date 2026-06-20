@@ -56,6 +56,24 @@ function Assert-Throws {
     }
 }
 
+function Get-PngDimensions {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path
+    )
+
+    Add-Type -AssemblyName System.Drawing
+    $image = [System.Drawing.Image]::FromFile($Path)
+    try {
+        return [pscustomobject]@{
+            Width = $image.Width
+            Height = $image.Height
+        }
+    } finally {
+        $image.Dispose()
+    }
+}
+
 function Invoke-Test {
     param(
         [Parameter(Mandatory)]
@@ -80,6 +98,30 @@ Invoke-Test 'safe source path validation rejects workspace paths with spaces or 
     } 'Expected the current workspace path to be rejected for source checkout use.'
 
     [void] (Assert-AstridSafeSourcePath -Path 'C:\mozilla-source\astrid-browser')
+}
+
+Invoke-Test 'asset folder contains only the source-derived Astrid icon set' {
+    $assetsDir = Join-Path $RepoRoot 'assets'
+    $expectedSizes = @(16, 32, 48, 64, 128, 256, 512)
+
+    Assert-True (Test-Path -LiteralPath (Join-Path $assetsDir 'astrid_icon_source.jpg') -PathType Leaf) 'Source icon image must be tracked.'
+    foreach ($size in $expectedSizes) {
+        $iconPath = Join-Path $assetsDir "astrid_icon_$size.png"
+        Assert-True (Test-Path -LiteralPath $iconPath -PathType Leaf) "Astrid ${size}px icon must exist."
+        $dimensions = Get-PngDimensions -Path $iconPath
+        Assert-Equal $dimensions.Width $size "Astrid ${size}px icon width must match."
+        Assert-Equal $dimensions.Height $size "Astrid ${size}px icon height must match."
+    }
+
+    $removedAssets = @(
+        'favicon_64.png',
+        'retrowave_browser_icon_256.png',
+        'retrowave_browser_icon_512.png',
+        'retrowave_browser_icon.svg'
+    )
+    foreach ($assetName in $removedAssets) {
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $assetsDir $assetName))) "Old icon asset '$assetName' must be removed."
+    }
 }
 
 Invoke-Test 'policy generation disables telemetry, studies, Pocket, sponsored surfaces, and crash upload' {
@@ -131,6 +173,8 @@ Invoke-Test 'start page generation writes local Astrid mission copy without upst
         Assert-True (Test-Path -LiteralPath $startPagePath -PathType Leaf) 'Start page must be written.'
         $startPageText = Get-Content -LiteralPath $startPagePath -Raw
         Assert-True ($startPageText.Contains('Astrid exists to make the web quiet again')) 'Start page must include the mission statement.'
+        Assert-True ($startPageText.Contains('astrid-start-icon.png')) 'Start page must use the generated Astrid PNG icon.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $tempRoot 'astrid-start-icon.png') -PathType Leaf) 'Start page icon must be copied beside the page.'
         Assert-True ($startPageText -notmatch '(?i)\bfirefox\b') 'Start page must not use Firefox wording.'
         Assert-True ($startPageText -notmatch '(?i)\bmozilla\b') 'Start page must not use Mozilla wording.'
         Assert-True ($startPageText -notmatch '(?i)sign\s*in') 'Start page must not invite sign in.'
@@ -414,7 +458,8 @@ Invoke-Test 'package staging writes updater and installed version metadata' {
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'astrid-version.json') -PathType Leaf) 'Staging must write installed version metadata.'
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'AstridUpdater.ps1') -PathType Leaf) 'Staging must include the updater script.'
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'AstridUpdateCheck.cmd') -PathType Leaf) 'Staging must include the updater launcher.'
-        Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'assets\retrowave_browser_icon_512.png') -PathType Leaf) 'Staging must include Astrid icon assets.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'assets\astrid_icon_512.png') -PathType Leaf) 'Staging must include Astrid icon assets.'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $staged.AppDir 'assets\retrowave_browser_icon_512.png'))) 'Staging must not include removed old icon assets.'
         Assert-True (Test-Path -LiteralPath (Join-Path $staged.AppDir 'assets\astrid.ico') -PathType Leaf) 'Staging must create the Windows installer icon.'
 
         $packageReadme = Get-Content -LiteralPath (Join-Path $staged.AppDir 'README-Astrid.txt') -Raw
@@ -439,9 +484,13 @@ Invoke-Test 'installer icon generator writes a Windows ICO from Astrid PNG asset
         $bytes = [System.IO.File]::ReadAllBytes($iconPath)
         Assert-Equal $bytes[0] 0 'ICO reserved byte 0 must be zero.'
         Assert-Equal $bytes[2] 1 'ICO type must be icon.'
-        Assert-Equal $bytes[4] 2 'ICO must contain 64px and 256px PNG entries.'
-        Assert-Equal $bytes[6] 64 'First ICO image entry must be 64px.'
-        Assert-Equal $bytes[22] 0 'Second ICO image entry width byte must be zero for 256px.'
+        Assert-Equal $bytes[4] 6 'ICO must contain the Windows Astrid icon size set.'
+        Assert-Equal $bytes[6] 16 'First ICO image entry must be 16px.'
+        Assert-Equal $bytes[22] 32 'Second ICO image entry must be 32px.'
+        Assert-Equal $bytes[38] 48 'Third ICO image entry must be 48px.'
+        Assert-Equal $bytes[54] 64 'Fourth ICO image entry must be 64px.'
+        Assert-Equal $bytes[70] 128 'Fifth ICO image entry must be 128px.'
+        Assert-Equal $bytes[86] 0 'Sixth ICO image entry width byte must be zero for 256px.'
         Assert-True ($bytes.Length -gt 1000) 'Generated ICO must include image payloads.'
     } finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -525,11 +525,11 @@ function Save-AstridStartPage {
 
     $iconHtml = '<div class="brand-mark fallback-mark" aria-hidden="true">A</div>'
     if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
-        $iconSourcePath = Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'assets\retrowave_browser_icon.svg'
+        $iconSourcePath = Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'assets\astrid_icon_512.png'
         if (Test-Path -LiteralPath $iconSourcePath -PathType Leaf) {
-            $iconDestPath = Join-Path $parent 'astrid-start-icon.svg'
+            $iconDestPath = Join-Path $parent 'astrid-start-icon.png'
             Copy-Item -LiteralPath $iconSourcePath -Destination $iconDestPath -Force
-            $iconHtml = '<img class="brand-mark image-mark" src="astrid-start-icon.svg" alt="" />'
+            $iconHtml = '<img class="brand-mark image-mark" src="astrid-start-icon.png" alt="" />'
         }
     }
 
@@ -1375,16 +1375,12 @@ function Save-AstridInstallerIcon {
     )
 
     $repoFullPath = [System.IO.Path]::GetFullPath($RepoRoot)
-    $iconEntries = @(
+    $iconEntries = @(16, 32, 48, 64, 128, 256) | ForEach-Object {
         [pscustomobject]@{
-            Path = Join-Path $repoFullPath 'assets\favicon_64.png'
-            Size = 64
-        },
-        [pscustomobject]@{
-            Path = Join-Path $repoFullPath 'assets\retrowave_browser_icon_256.png'
-            Size = 256
+            Path = Join-Path $repoFullPath "assets\astrid_icon_$_.png"
+            Size = $_
         }
-    )
+    }
 
     $payloads = [System.Collections.Generic.List[object]]::new()
     foreach ($entry in $iconEntries) {
