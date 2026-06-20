@@ -1076,6 +1076,159 @@ function Install-AstridDistribution {
     }
 }
 
+function Set-AstridNsiDefine {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Text,
+        [Parameter(Mandatory)]
+        [string] $Name,
+        [Parameter(Mandatory)]
+        [string] $Value
+    )
+
+    $line = if ($Name -eq 'BrandFullName') {
+        [string]::Concat('!define BrandFullName         "', $Value, '"')
+    } else {
+        [string]::Concat('!define ', $Name, ' "', $Value, '"')
+    }
+    $pattern = "(?m)^!define\s+$([regex]::Escape($Name))\s+.*$"
+    if ($Text -match $pattern) {
+        return [regex]::Replace($Text, $pattern, $line)
+    }
+
+    return ($Text.TrimEnd() + [Environment]::NewLine + $line + [Environment]::NewLine)
+}
+
+function Install-AstridSourceBranding {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RepoRoot,
+        [Parameter(Mandatory)]
+        [string] $SourceDir
+    )
+
+    $repoFullPath = [System.IO.Path]::GetFullPath($RepoRoot)
+    $safeSourceDir = Assert-AstridSafeSourcePath -Path $SourceDir
+    if (-not (Test-Path -LiteralPath $safeSourceDir -PathType Container)) {
+        throw "Source directory '$safeSourceDir' does not exist. Run scripts/bootstrap.ps1 first."
+    }
+
+    $brandingParent = Join-Path $safeSourceDir 'browser\branding'
+    $baseBrandingDir = Join-Path $brandingParent 'unofficial'
+    if (-not (Test-Path -LiteralPath $baseBrandingDir -PathType Container)) {
+        throw "Base branding directory '$baseBrandingDir' does not exist."
+    }
+
+    $brandingDir = Reset-AstridDirectory -Path (Join-Path $brandingParent 'astrid') -AllowedParent $brandingParent
+    foreach ($item in Get-ChildItem -LiteralPath $baseBrandingDir -Force) {
+        Copy-Item -LiteralPath $item.FullName -Destination $brandingDir -Recurse -Force
+    }
+
+    foreach ($size in @(16, 32, 48, 64, 128, 256)) {
+        $sourceIconPath = Join-Path $repoFullPath "assets\astrid_icon_$size.png"
+        $destinationIconPath = Join-Path $brandingDir "default$size.png"
+        if (-not (Test-Path -LiteralPath $sourceIconPath -PathType Leaf)) {
+            throw "Missing Astrid icon source asset '$sourceIconPath'."
+        }
+
+        Copy-Item -LiteralPath $sourceIconPath -Destination $destinationIconPath -Force
+    }
+
+    $largeIconPath = Join-Path $repoFullPath 'assets\astrid_icon_512.png'
+    Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $brandingDir 'default22.png') -Width 22 -Height 22 | Out-Null
+    Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $brandingDir 'default24.png') -Width 24 -Height 24 | Out-Null
+    Save-AstridIconFile -RepoRoot $repoFullPath -OutputPath (Join-Path $brandingDir 'firefox.ico') -Sizes @(16, 32, 48, 64, 128, 256) | Out-Null
+    Save-AstridIconFile -RepoRoot $repoFullPath -OutputPath (Join-Path $brandingDir 'firefox64.ico') -Sizes @(16, 32, 48, 64) | Out-Null
+    Save-AstridIconFile -RepoRoot $repoFullPath -OutputPath (Join-Path $brandingDir 'newtab.ico') -Sizes @(16, 32) | Out-Null
+    Save-AstridIconFile -RepoRoot $repoFullPath -OutputPath (Join-Path $brandingDir 'newwindow.ico') -Sizes @(16, 32) | Out-Null
+    Save-AstridIconFile -RepoRoot $repoFullPath -OutputPath (Join-Path $brandingDir 'pbmode.ico') -Sizes @(16, 32, 48, 64, 128, 256) | Out-Null
+
+    $contentDir = Join-Path $brandingDir 'content'
+    if (Test-Path -LiteralPath $contentDir -PathType Container) {
+        Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $contentDir 'about-logo.png') -Width 192 -Height 192 | Out-Null
+        Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $contentDir 'about-logo@2x.png') -Width 384 -Height 384 | Out-Null
+        Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $contentDir 'about-logo-private.png') -Width 192 -Height 192 | Out-Null
+        Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $contentDir 'about-logo-private@2x.png') -Width 384 -Height 384 | Out-Null
+    }
+
+    Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $brandingDir 'VisualElements_70.png') -Width 126 -Height 126 | Out-Null
+    Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $brandingDir 'VisualElements_150.png') -Width 270 -Height 270 | Out-Null
+    Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $brandingDir 'PrivateBrowsing_70.png') -Width 126 -Height 126 | Out-Null
+    Save-AstridScaledPng -SourcePath $largeIconPath -OutputPath (Join-Path $brandingDir 'PrivateBrowsing_150.png') -Width 270 -Height 270 | Out-Null
+
+    $configurePath = Join-Path $brandingDir 'configure.sh'
+    Set-Content -LiteralPath $configurePath -Value @(
+        '# This Source Code Form is subject to the terms of the Mozilla Public',
+        '# License, v. 2.0. If a copy of the MPL was not distributed with this',
+        '# file, You can obtain one at http://mozilla.org/MPL/2.0/.',
+        '',
+        'MOZ_APP_DISPLAYNAME=Astrid'
+    ) -Encoding UTF8
+
+    $brandingNsiPath = Join-Path $brandingDir 'branding.nsi'
+    $brandingNsiText = if (Test-Path -LiteralPath $brandingNsiPath -PathType Leaf) {
+        Get-Content -LiteralPath $brandingNsiPath -Raw
+    } else {
+        ''
+    }
+    $brandingNsiText = Set-AstridNsiDefine -Text $brandingNsiText -Name 'BrandFullNameInternal' -Value 'Astrid'
+    $brandingNsiText = Set-AstridNsiDefine -Text $brandingNsiText -Name 'BrandFullName' -Value 'Astrid'
+    $brandingNsiText = Set-AstridNsiDefine -Text $brandingNsiText -Name 'CompanyName' -Value 'Wrathalan'
+    $brandingNsiText = Set-AstridNsiDefine -Text $brandingNsiText -Name 'URLInfoAbout' -Value 'https://github.com/Wrathalan/Astrid'
+    $brandingNsiText = Set-AstridNsiDefine -Text $brandingNsiText -Name 'HelpLink' -Value 'https://github.com/Wrathalan/Astrid'
+    $brandingNsiText = Set-AstridNsiDefine -Text $brandingNsiText -Name 'Channel' -Value 'astrid'
+    Set-Content -LiteralPath $brandingNsiPath -Value $brandingNsiText -Encoding UTF8
+
+    $brandFtlPath = Join-Path $brandingDir 'locales\en-US\brand.ftl'
+    if (Test-Path -LiteralPath $brandFtlPath -PathType Leaf) {
+        Set-Content -LiteralPath $brandFtlPath -Value @(
+            '-brand-shorter-name = Astrid',
+            '-brand-short-name = Astrid',
+            '-brand-shortcut-name = Astrid',
+            '-brand-full-name = Astrid',
+            '-brand-product-name = Astrid',
+            '-vendor-short-name = Wrathalan',
+            'trademarkInfo = { " " }'
+        ) -Encoding UTF8
+    }
+
+    $brandPropertiesPath = Join-Path $brandingDir 'locales\en-US\brand.properties'
+    if (Test-Path -LiteralPath $brandPropertiesPath -PathType Leaf) {
+        Set-Content -LiteralPath $brandPropertiesPath -Value @(
+            'brandShorterName=Astrid',
+            'brandShortName=Astrid',
+            'brandFullName=Astrid'
+        ) -Encoding UTF8
+    }
+
+    $staleResourcePaths = @(
+        (Join-Path $safeSourceDir 'obj-astrid\browser\app\astrid.exe.rc'),
+        (Join-Path $safeSourceDir 'obj-astrid\browser\app\astrid.exe.res'),
+        (Join-Path $safeSourceDir 'obj-astrid\browser\app\pbproxy\private_browsing.exe.rc'),
+        (Join-Path $safeSourceDir 'obj-astrid\browser\app\pbproxy\private_browsing.exe.res')
+    )
+    $removedResourcePaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($staleResourcePath in $staleResourcePaths) {
+        $fullStaleResourcePath = [System.IO.Path]::GetFullPath($staleResourcePath)
+        if (-not $fullStaleResourcePath.StartsWith($safeSourceDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove generated resource outside source directory: '$fullStaleResourcePath'."
+        }
+
+        if (Test-Path -LiteralPath $fullStaleResourcePath -PathType Leaf) {
+            Remove-Item -LiteralPath $fullStaleResourcePath -Force
+            $removedResourcePaths.Add($fullStaleResourcePath)
+        }
+    }
+
+    return [pscustomobject]@{
+        BrandingDir = $brandingDir
+        FirefoxIcoPath = Join-Path $brandingDir 'firefox.ico'
+        Firefox64IcoPath = Join-Path $brandingDir 'firefox64.ico'
+        RemovedResourcePaths = [string[]] $removedResourcePaths.ToArray()
+    }
+}
+
 function Write-AstridMozConfig {
     [CmdletBinding()]
     param(
@@ -1106,7 +1259,7 @@ function Write-AstridMozConfig {
     $lines = @(
         '# Generated by Astrid. Keep source patches in the orchestration repo.',
         'ac_add_options --enable-project=browser',
-        'ac_add_options --with-branding=browser/branding/unofficial',
+        'ac_add_options --with-branding=browser/branding/astrid',
         'ac_add_options --with-app-name=astrid',
         'ac_add_options --with-app-basename=Astrid',
         'ac_add_options --with-distribution-id=org.astrid.browser',
@@ -1341,56 +1494,85 @@ function Save-AstridReleaseManifest {
     return $OutputPath
 }
 
-function Reset-AstridDirectory {
+function Save-AstridScaledPng {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string] $Path,
+        [string] $SourcePath,
         [Parameter(Mandatory)]
-        [string] $AllowedParent
+        [string] $OutputPath,
+        [Parameter(Mandatory)]
+        [int] $Width,
+        [Parameter(Mandatory)]
+        [int] $Height,
+        [double] $PaddingRatio = 0
     )
 
-    $fullPath = [System.IO.Path]::GetFullPath($Path)
-    $allowedFullPath = [System.IO.Path]::GetFullPath($AllowedParent).TrimEnd('\')
-    $allowedPrefix = "$allowedFullPath\"
-    if (-not $fullPath.StartsWith($allowedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to reset '$fullPath' because it is outside allowed parent '$allowedFullPath'."
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Missing source PNG '$SourcePath'."
     }
 
-    if (Test-Path -LiteralPath $fullPath) {
-        Remove-Item -LiteralPath $fullPath -Recurse -Force
+    Add-Type -AssemblyName System.Drawing
+    $parent = Split-Path -Parent $OutputPath
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
 
-    New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
-    return $fullPath
+    $source = [System.Drawing.Image]::FromFile($SourcePath)
+    $bitmap = [System.Drawing.Bitmap]::new($Width, $Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.Clear([System.Drawing.Color]::Transparent)
+        $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+
+        $shortEdge = [Math]::Min($Width, $Height)
+        $padding = [int] [Math]::Round($shortEdge * $PaddingRatio)
+        $drawSize = [Math]::Max(1, $shortEdge - (2 * $padding))
+        $destination = [System.Drawing.Rectangle]::new(
+            [int] [Math]::Round(($Width - $drawSize) / 2),
+            [int] [Math]::Round(($Height - $drawSize) / 2),
+            $drawSize,
+            $drawSize
+        )
+        $graphics.DrawImage($source, $destination)
+        $bitmap.Save($OutputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        $source.Dispose()
+    }
+
+    return $OutputPath
 }
 
-function Save-AstridInstallerIcon {
+function Save-AstridIconFile {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
         [string] $RepoRoot,
         [Parameter(Mandatory)]
-        [string] $OutputPath
+        [string] $OutputPath,
+        [int[]] $Sizes = @(16, 32, 48, 64, 128, 256)
     )
 
     $repoFullPath = [System.IO.Path]::GetFullPath($RepoRoot)
-    $iconEntries = @(16, 32, 48, 64, 128, 256) | ForEach-Object {
-        [pscustomobject]@{
-            Path = Join-Path $repoFullPath "assets\astrid_icon_$_.png"
-            Size = $_
-        }
-    }
-
     $payloads = [System.Collections.Generic.List[object]]::new()
-    foreach ($entry in $iconEntries) {
-        if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) {
-            throw "Missing Astrid icon source asset '$($entry.Path)'."
+    foreach ($size in $Sizes) {
+        if ($size -gt 256) {
+            throw "ICO image size '$size' is not supported; use PNG assets for larger sizes."
+        }
+
+        $iconPath = Join-Path $repoFullPath "assets\astrid_icon_$size.png"
+        if (-not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
+            throw "Missing Astrid icon source asset '$iconPath'."
         }
 
         $payloads.Add([pscustomobject]@{
-            Size = [int] $entry.Size
-            Bytes = [System.IO.File]::ReadAllBytes($entry.Path)
+            Size = [int] $size
+            Bytes = [System.IO.File]::ReadAllBytes($iconPath)
         })
     }
 
@@ -1429,6 +1611,42 @@ function Save-AstridInstallerIcon {
     }
 
     return $OutputPath
+}
+
+function Reset-AstridDirectory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path,
+        [Parameter(Mandatory)]
+        [string] $AllowedParent
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $allowedFullPath = [System.IO.Path]::GetFullPath($AllowedParent).TrimEnd('\')
+    $allowedPrefix = "$allowedFullPath\"
+    if (-not $fullPath.StartsWith($allowedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset '$fullPath' because it is outside allowed parent '$allowedFullPath'."
+    }
+
+    if (Test-Path -LiteralPath $fullPath) {
+        Remove-Item -LiteralPath $fullPath -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
+    return $fullPath
+}
+
+function Save-AstridInstallerIcon {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RepoRoot,
+        [Parameter(Mandatory)]
+        [string] $OutputPath
+    )
+
+    return Save-AstridIconFile -RepoRoot $RepoRoot -OutputPath $OutputPath -Sizes @(16, 32, 48, 64, 128, 256)
 }
 
 function New-AstridPackageStaging {
@@ -1637,6 +1855,7 @@ Export-ModuleMember -Function @(
     'Initialize-AstridMozillaBuildEnvironment',
     'Install-AstridDistribution',
     'Install-AstridRuntimeDistribution',
+    'Install-AstridSourceBranding',
     'Invoke-AstridPatches',
     'New-AstridPackageStaging',
     'New-AstridAutoConfigPreferences',

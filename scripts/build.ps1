@@ -30,6 +30,9 @@ if (-not $AllowMissingBlocker -and -not (Test-Path -LiteralPath $blockerXpi -Pat
 $distribution = Install-AstridDistribution -RepoRoot $RepoRoot -SourceDir $SourceDir
 Write-Host "Installed Astrid policies to $($distribution.PolicyPath)"
 
+$sourceBranding = Install-AstridSourceBranding -RepoRoot $RepoRoot -SourceDir $SourceDir
+Write-Host "Installed Astrid source branding to $($sourceBranding.BrandingDir)"
+
 $mozconfigPath = Write-AstridMozConfig -SourceDir $SourceDir -Configuration $Configuration
 Write-Host "Wrote Astrid mozconfig to $mozconfigPath"
 

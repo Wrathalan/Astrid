@@ -298,6 +298,68 @@ Invoke-Test 'browser executable resolver prefers branded Astrid binaries' {
     }
 }
 
+Invoke-Test 'mozconfig points at Astrid source branding' {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-mozconfig-" + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempRoot | Out-Null
+    try {
+        $mozconfigPath = Write-AstridMozConfig -SourceDir $tempRoot
+        $mozconfigText = Get-Content -LiteralPath $mozconfigPath -Raw
+
+        Assert-True ($mozconfigText.Contains('ac_add_options --with-branding=browser/branding/astrid')) 'mozconfig must use the generated Astrid branding directory.'
+        Assert-True (-not $mozconfigText.Contains('browser/branding/unofficial')) 'mozconfig must not keep using the unofficial branding directory.'
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-Test 'source branding overlay writes Astrid icons for executable resources' {
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-branding-" + [System.Guid]::NewGuid().ToString('N'))
+    $unofficialDir = Join-Path $tempRoot 'browser\branding\unofficial'
+    New-Item -ItemType Directory -Path (Join-Path $unofficialDir 'content') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $unofficialDir 'locales\en-US') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $unofficialDir 'moz.build') -Value 'DIRS += ["content", "locales"]' -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $unofficialDir 'content\jar.mn') -Value 'browser.jar:' -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $unofficialDir 'locales\en-US\brand.ftl') -Value 'brand-short-name = Mozilla Developer Preview' -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $unofficialDir 'locales\en-US\brand.properties') -Value 'brandShorterName=Mozilla Developer Preview' -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $unofficialDir 'configure.sh') -Value 'MOZ_APP_DISPLAYNAME=Nightly' -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $unofficialDir 'branding.nsi') -Value '!define BrandFullName "Mozilla Developer Preview"' -Encoding Ascii
+    $objectAppDir = Join-Path $tempRoot 'obj-astrid\browser\app'
+    New-Item -ItemType Directory -Path $objectAppDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $objectAppDir 'astrid.exe.rc') -Value 'old resource script' -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $objectAppDir 'astrid.exe.res') -Value 'old resource object' -Encoding Ascii
+    New-Item -ItemType Directory -Path (Join-Path $objectAppDir 'pbproxy') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $objectAppDir 'pbproxy\private_browsing.exe.rc') -Value 'old private resource script' -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $objectAppDir 'pbproxy\private_browsing.exe.res') -Value 'old private resource object' -Encoding Ascii
+
+    try {
+        $branding = Install-AstridSourceBranding -RepoRoot $RepoRoot -SourceDir $tempRoot
+
+        Assert-Equal $branding.BrandingDir (Join-Path $tempRoot 'browser\branding\astrid') 'Branding overlay must be written to browser/branding/astrid.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $branding.BrandingDir 'firefox.ico') -PathType Leaf) 'Executable ICO must be written.'
+        Assert-True (Test-Path -LiteralPath (Join-Path $branding.BrandingDir 'firefox64.ico') -PathType Leaf) '64px executable ICO must be written.'
+
+        foreach ($size in @(16, 32, 48, 64, 128, 256)) {
+            $iconPath = Join-Path $branding.BrandingDir "default$size.png"
+            Assert-True (Test-Path -LiteralPath $iconPath -PathType Leaf) "Branding default$size.png must be written."
+            $dimensions = Get-PngDimensions -Path $iconPath
+            Assert-Equal $dimensions.Width $size "Branding default$size.png width must match."
+            Assert-Equal $dimensions.Height $size "Branding default$size.png height must match."
+        }
+
+        $configureText = Get-Content -LiteralPath (Join-Path $branding.BrandingDir 'configure.sh') -Raw
+        $brandingNsiText = Get-Content -LiteralPath (Join-Path $branding.BrandingDir 'branding.nsi') -Raw
+        Assert-True ($configureText.Contains('MOZ_APP_DISPLAYNAME=Astrid')) 'Branding configure.sh must use Astrid display name.'
+        Assert-True ($brandingNsiText.Contains('BrandFullName         "Astrid"')) 'Branding installer metadata must use Astrid name.'
+        Assert-True (-not $brandingNsiText.Contains('Mozilla Developer Preview')) 'Branding metadata must not keep the upstream preview name.'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $objectAppDir 'astrid.exe.rc'))) 'Stale generated app resource script must be removed.'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $objectAppDir 'astrid.exe.res'))) 'Stale generated app resource object must be removed.'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $objectAppDir 'pbproxy\private_browsing.exe.rc'))) 'Stale private browsing resource script must be removed.'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $objectAppDir 'pbproxy\private_browsing.exe.res'))) 'Stale private browsing resource object must be removed.'
+    } finally {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Invoke-Test 'runtime distribution writes policies next to the browser executable' {
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("astrid-runtime-" + [System.Guid]::NewGuid().ToString('N'))
     $binDir = Join-Path $tempRoot 'obj-astrid\dist\bin'
